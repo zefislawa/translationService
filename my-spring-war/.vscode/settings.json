@@ -6,5 +6,7 @@
       "default": true
     }
   ],
-  "java.jdt.ls.java.home": "C:\\Program Files\\jdk-17+35"
+  "java.jdt.ls.java.home": "C:\\Program Files\\jdk-17+35",
+  "java.compile.nullAnalysis.mode": "disabled",
+  "java.configuration.updateBuildConfiguration": "interactive"
 }
