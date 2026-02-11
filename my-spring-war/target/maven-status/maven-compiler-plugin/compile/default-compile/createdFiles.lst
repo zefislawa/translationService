@@ -1,0 +1,4 @@
+com\example\api\HealthController.class
+com\example\api\StoreController.class
+com\example\MySpringWarApplication.class
+com\example\storage\JsonFileStore.class
