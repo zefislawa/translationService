@@ -1,8 +1,153 @@
-<!doctype html>
-<html>
-  <head><meta charset="utf-8"><title>My UI</title></head>
-  <body>
-    <h1>UI is running</h1>
-    <p>API test: <a href="/api/health">/api/health</a></p>
-  </body>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Translation Management Form</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <form id="translationForm" class="form-card">
+            <!-- Success Message -->
+            <div id="successMessage" class="success-banner">
+                <svg class="icon success-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+                    <polyline points="22 4 12 14.01 9 11.01"></polyline>
+                </svg>
+                <span>Translation was successful</span>
+            </div>
+
+            <!-- Header Section -->
+            <div class="form-header">
+                <div class="form-group">
+                    <label class="form-label">Choose a file</label>
+                    <div class="input-row">
+                        <select id="fileSelect" class="select-input">
+                            <option value="en.json">en.json</option>
+                            <option value="fr.json">fr.json</option>
+                            <option value="bg.json">bg.json</option>
+                        </select>
+                        <button type="button" class="btn btn-primary" id="selectFileBtn">Select</button>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <div class="search-container">
+                        <svg class="icon search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="11" cy="11" r="8"></circle>
+                            <path d="m21 21-4.35-4.35"></path>
+                        </svg>
+                        <input type="text" id="searchInput" class="search-input" placeholder="Search in Key and Text...">
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <div class="input-row">
+                        <label class="form-label">Rows per page:</label>
+                        <select id="rowsPerPage" class="select-input-small">
+                            <option value="10">10</option>
+                            <option value="20">20</option>
+                            <option value="40">40</option>
+                            <option value="50">50</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Table Section -->
+            <div class="table-container">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th class="col-checkbox">
+                                <input type="checkbox" id="selectAll" class="checkbox" aria-label="Select all rows">
+                            </th>
+                            <th class="col-key">Key (static)</th>
+                            <th class="col-text">Text (Editable)</th>
+                            <th class="col-source">Source Text (English)</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tableBody">
+                        <!-- Rows will be inserted here by JavaScript -->
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- Footer Section -->
+            <div class="form-footer">
+                <button type="button" class="btn btn-outline" id="addRowBtn">
+                    <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="12" y1="5" x2="12" y2="19"></line>
+                        <line x1="5" y1="12" x2="19" y2="12"></line>
+                    </svg>
+                    Add Row
+                </button>
+
+                <div class="pagination-controls">
+                    <button type="button" class="btn btn-outline btn-sm" id="prevBtn">Previous</button>
+                    <span class="page-info" id="pageInfo">Page 1 of 1</span>
+                    <button type="button" class="btn btn-outline btn-sm" id="nextBtn">Next</button>
+                </div>
+
+                <button type="submit" class="btn btn-primary">Submit</button>
+            </div>
+
+            <!-- Translation Section -->
+            <div class="translation-section">
+                <h3 class="section-title">Translate your texts</h3>
+                <div class="translation-controls">
+                    <div class="form-group">
+                        <label class="form-label">Select language</label>
+                        <select id="targetLanguage" class="select-input">
+                            <option value="es">Spanish</option>
+                            <option value="fr" selected>French</option>
+                            <option value="de">German</option>
+                            <option value="it">Italian</option>
+                            <option value="pt">Portuguese</option>
+                            <option value="nl">Dutch</option>
+                            <option value="pl">Polish</option>
+                            <option value="ru">Russian</option>
+                            <option value="ja">Japanese</option>
+                            <option value="zh">Chinese</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label invisible">Action</label>
+                        <button type="button" class="btn btn-primary" id="translateBtn">
+                            <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="m5 8 6 6"></path>
+                                <path d="m4 14 6-6 2-3"></path>
+                                <path d="M2 5h12"></path>
+                                <path d="M7 2h1"></path>
+                                <path d="m22 22-5-10-5 10"></path>
+                                <path d="M14 18h6"></path>
+                            </svg>
+                            Translate
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </form>
+    </div>
+
+    <!-- Edit Dialog -->
+    <div id="editDialog" class="dialog-overlay">
+        <div class="dialog-content">
+            <div class="dialog-header">
+                <h2 id="dialogTitle" class="dialog-title">Edit Text</h2>
+                <button type="button" class="dialog-close" id="closeDialog">&times;</button>
+            </div>
+            <div class="dialog-body">
+                <textarea id="editTextarea" class="textarea" placeholder="Enter value"></textarea>
+            </div>
+            <div class="dialog-footer">
+                <button type="button" class="btn btn-outline" id="cancelEdit">Cancel</button>
+                <button type="button" class="btn btn-primary" id="saveEdit">Save</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
 </html>
