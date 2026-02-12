@@ -192,12 +192,6 @@ async function handleLoadFiles() {
 
   elements.fileSelect.innerHTML = '';
 
-  if (files.length === 0) {
-    selectedFile = '';
-    showSuccessMessage('No .json files found for this path.');
-    return;
-  }
-
   files.forEach((name) => {
     const option = document.createElement('option');
     option.value = name;
@@ -236,11 +230,7 @@ function handleSubmit(e) {
   showSuccessMessage('Edits are in memory. Click Translate to export JSON payload.');
 }
 
-elements.loadFilesBtn.addEventListener('click', () => handleLoadFiles().catch((e) => {
-  console.error(e);
-  alert(e.message);
-  showSuccessMessage(`Error: ${e.message}`);
-}));
+elements.loadFilesBtn.addEventListener('click', () => handleLoadFiles().catch((e) => alert(e.message)));
 elements.selectFileBtn.addEventListener('click', () => loadRows().catch((e) => alert(e.message)));
 elements.searchInput.addEventListener('input', handleSearch);
 elements.rowsPerPageSelect.addEventListener('change', handleRowsPerPageChange);
@@ -265,10 +255,6 @@ elements.translationForm.addEventListener('submit', handleSubmit);
 document.addEventListener('DOMContentLoaded', async () => {
   try {
     await handleLoadFiles();
-
-    if (!elements.fileSelect.value && elements.fileSelect.options.length > 0) {
-      elements.fileSelect.selectedIndex = 0;
-    }
 
     if (elements.fileSelect.value) {
       await loadRows();
