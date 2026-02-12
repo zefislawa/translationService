@@ -21,6 +21,11 @@ public class TranslationController {
         this.translationService = translationService;
     }
 
+    @GetMapping("/{file}")
+    public List<TranslationRow> getRowsLegacy(@PathVariable("file") String file) throws Exception {
+        return translationService.loadRows(file);
+    }
+
     @PostMapping("/files")
     public Map<String, Object> listFiles(@RequestBody(required = false) TranslationPathRequest request) throws Exception {
         String path = request == null ? null : request.getPath();

@@ -27,21 +27,33 @@ function getPathValue() {
   return (elements.pathInput.value || "").trim();
 }
 
+function getBaseName(fileName) {
+  if (!fileName) return "";
+  return fileName.replace(/\.json$/i, "");
+}
+
 async function fetchFiles() {
   const path = getPathValue();
+
+  // Preferred API: POST with JSON body (handles Windows paths safely).
   const res = await fetch('/api/translations/files', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ path })
   });
 
-  if (!res.ok) {
-    const text = await res.text().catch(() => '');
-    throw new Error(`Unable to list files (HTTP ${res.status}). ${text}`);
+  if (res.ok) {
+    return res.json();
   }
-  return res.json();
-}
 
+  // Backward-compatible fallback for older backend versions.
+  if (res.status === 404 || res.status === 405) {
+    return { path, files: [] };
+  }
+
+  const text = await res.text().catch(() => '');
+  throw new Error(`Unable to list files (HTTP ${res.status}). ${text}`);
+}
 async function loadRows() {
   const path = getPathValue();
   selectedFile = elements.fileSelect.value;
@@ -50,13 +62,26 @@ async function loadRows() {
     throw new Error("Please load and select a file first.");
   }
 
-  const res = await fetch('/api/translations/load', {
+  // Preferred API
+  let res = await fetch('/api/translations/load', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ path, fileName: selectedFile })
   });
 
-  if (!res.ok) throw new Error(`Unable to load file (HTTP ${res.status})`);
+  // Backward-compatible fallback for older backend versions.
+  if (res.status === 404 || res.status === 405) {
+    const base = getBaseName(selectedFile);
+    res = await fetch(`/api/translations/${encodeURIComponent(base)}`, {
+      method: 'GET',
+      headers: { 'Accept': 'application/json' }
+    });
+  }
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    throw new Error(`Unable to load file (HTTP ${res.status}). ${text}`);
+  }
 
   const apiRows = await res.json();
   rows = (apiRows || []).map((r) => ({
@@ -70,7 +95,6 @@ async function loadRows() {
   renderTable();
   showSuccessMessage(`Loaded ${rows.length} rows from ${selectedFile}.`);
 }
-
 async function exportTranslatePayload() {
   const path = getPathValue();
   targetLanguage = elements.targetLanguageSelect.value;
@@ -170,7 +194,7 @@ async function handleLoadFiles() {
     empty.textContent = 'No .json files found';
     elements.fileSelect.appendChild(empty);
     selectedFile = '';
-    showSuccessMessage('No JSON files found for this path.');
+    showSuccessMessage('No JSON files returned by API for this path. You can still choose an existing filename and click Select.');
     return;
   }
 
@@ -241,6 +265,11 @@ elements.translationForm.addEventListener('submit', handleSubmit);
 document.addEventListener('DOMContentLoaded', async () => {
   try {
     await handleLoadFiles();
+
+    if (!elements.fileSelect.value && elements.fileSelect.options.length > 0) {
+      elements.fileSelect.selectedIndex = 0;
+    }
+
     if (elements.fileSelect.value) {
       await loadRows();
     }
