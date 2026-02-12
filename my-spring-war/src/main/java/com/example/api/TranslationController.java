@@ -3,6 +3,7 @@ package com.example.api;
 import com.example.api.dto.TranslationExportRequest;
 import com.example.api.dto.TranslationExportResult;
 import com.example.api.dto.TranslationFileLoadRequest;
+import com.example.api.dto.SupportedLanguage;
 import com.example.api.dto.TranslationRow;
 import com.example.service.TranslationService;
 import org.springframework.web.bind.annotation.*;
@@ -24,6 +25,11 @@ public class TranslationController {
     public Map<String, Object> listFiles(@RequestParam(value = "path", required = false) String path) throws Exception {
         List<String> files = translationService.listJsonFiles(path);
         return Map.of("path", path, "files", files);
+    }
+
+    @GetMapping("/supported-languages")
+    public List<SupportedLanguage> supportedLanguages() {
+        return translationService.getSupportedLanguages();
     }
 
     @PostMapping("/load")

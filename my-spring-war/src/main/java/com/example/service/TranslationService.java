@@ -2,6 +2,7 @@ package com.example.service;
 
 import com.example.api.dto.TranslationExportResult;
 import com.example.api.dto.TranslationRow;
+import com.example.api.dto.SupportedLanguage;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.web.client.RestTemplateBuilder;
@@ -21,6 +22,7 @@ import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.stream.Stream;
 
 @Service
@@ -30,15 +32,21 @@ public class TranslationService {
     private final ObjectMapper mapper;
     private final RestTemplate restTemplate;
     private final String googleApiKey;
+    private final String googleProjectId;
+    private final String displayLanguageCode;
 
     public TranslationService(
             @Value("${myapp.dataDir}") String defaultDataDir,
             @Value("${myapp.google.apiKey}") String googleApiKey,
+            @Value("${myapp.google.projectId}") String googleProjectId,
+            @Value("${myapp.google.displayLanguageCode:en}") String displayLanguageCode,
             ObjectMapper mapper,
             RestTemplateBuilder restTemplateBuilder
     ) throws Exception {
         this.defaultDataDir = Path.of(defaultDataDir).toAbsolutePath();
         this.googleApiKey = googleApiKey;
+        this.googleProjectId = googleProjectId;
+        this.displayLanguageCode = displayLanguageCode;
         this.mapper = mapper;
         this.restTemplate = restTemplateBuilder
                 .setConnectTimeout(Duration.ofSeconds(15))
@@ -125,6 +133,32 @@ public class TranslationService {
         return new TranslationExportResult(outputFile.toAbsolutePath().toString(), targetLanguage, translatedTexts.size());
     }
 
+    public List<SupportedLanguage> getSupportedLanguages() {
+        String url = UriComponentsBuilder
+                .fromHttpUrl("https://translation.googleapis.com/v3/projects/{projectId}/locations/global/supportedLanguages")
+                .queryParam("key", googleApiKey)
+                .queryParam("displayLanguageCode", displayLanguageCode)
+                .buildAndExpand(googleProjectId)
+                .toUriString();
+
+        ResponseEntity<GoogleSupportedLanguagesResponse> response = restTemplate.getForEntity(
+                url,
+                GoogleSupportedLanguagesResponse.class
+        );
+
+        GoogleSupportedLanguagesResponse responseBody = response.getBody();
+        if (responseBody == null || responseBody.languages() == null) {
+            throw new IllegalStateException("Google supported languages response is empty");
+        }
+
+        return responseBody.languages().stream()
+                .filter(language -> Boolean.TRUE.equals(language.supportTarget()))
+                .filter(language -> language.languageCode() != null && !language.languageCode().isBlank())
+                .map(language -> new SupportedLanguage(language.languageCode(), Objects.requireNonNullElse(language.displayName(), language.languageCode())))
+                .sorted(Comparator.comparing(SupportedLanguage::displayName, String.CASE_INSENSITIVE_ORDER))
+                .toList();
+    }
+
     private List<String> callGoogleTranslate(String sourceLanguage, String targetLanguage, List<String> contents) {
         String url = UriComponentsBuilder
                 .fromHttpUrl("https://translation.googleapis.com/language/translate/v2")
@@ -198,5 +232,16 @@ public class TranslationService {
     }
 
     private record GoogleTranslation(String translatedText) {
+    }
+
+    private record GoogleSupportedLanguagesResponse(List<GoogleSupportedLanguage> languages) {
+    }
+
+    private record GoogleSupportedLanguage(
+            String languageCode,
+            String displayName,
+            Boolean supportSource,
+            Boolean supportTarget
+    ) {
     }
 }

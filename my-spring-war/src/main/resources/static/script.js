@@ -1,7 +1,7 @@
 let rows = [];
 let searchQuery = "";
 let selectedFile = "";
-let targetLanguage = "fr";
+let targetLanguage = "";
 let rowsPerPage = 10;
 let currentPage = 1;
 
@@ -33,6 +33,30 @@ async function fetchFiles() {
   const res = await fetch(`/api/translations/files${query}`);
   if (!res.ok) throw new Error(`Unable to list files (HTTP ${res.status})`);
   return res.json();
+}
+
+async function fetchSupportedLanguages() {
+  const res = await fetch('/api/translations/supported-languages');
+  if (!res.ok) throw new Error(`Unable to load supported languages (HTTP ${res.status})`);
+  return res.json();
+}
+
+function renderSupportedLanguages(languages) {
+  elements.targetLanguageSelect.innerHTML = '';
+
+  (languages || []).forEach((language) => {
+    const option = document.createElement('option');
+    option.value = language.languageCode;
+    option.textContent = `${language.displayName} (${language.languageCode})`;
+    elements.targetLanguageSelect.appendChild(option);
+  });
+
+  const preferredLanguage = 'fr';
+  const hasPreferredLanguage = (languages || []).some((language) => language.languageCode === preferredLanguage);
+  targetLanguage = hasPreferredLanguage ? preferredLanguage : (languages[0]?.languageCode || '');
+  if (targetLanguage) {
+    elements.targetLanguageSelect.value = targetLanguage;
+  }
 }
 
 async function loadRows() {
@@ -152,6 +176,9 @@ function showSuccessMessage(message) {
 }
 
 async function handleLoadFiles() {
+  const supportedLanguages = await fetchSupportedLanguages();
+  renderSupportedLanguages(supportedLanguages);
+
   const data = await fetchFiles();
   const files = data.files || [];
 
@@ -164,7 +191,7 @@ async function handleLoadFiles() {
   });
 
   selectedFile = files[0] || "";
-  showSuccessMessage(`Loaded ${files.length} files from directory.`);
+  showSuccessMessage(`Loaded ${files.length} files and ${supportedLanguages.length} supported languages.`);
 }
 
 function handleRowsPerPageChange() {
