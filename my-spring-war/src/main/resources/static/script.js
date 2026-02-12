@@ -193,12 +193,8 @@ async function handleLoadFiles() {
   elements.fileSelect.innerHTML = '';
 
   if (files.length === 0) {
-    const empty = document.createElement('option');
-    empty.value = '';
-    empty.textContent = 'No .json files found';
-    elements.fileSelect.appendChild(empty);
     selectedFile = '';
-    showSuccessMessage('No JSON files returned by API for this path. You can still choose an existing filename and click Select.');
+    showSuccessMessage('No .json files found for this path.');
     return;
   }
 

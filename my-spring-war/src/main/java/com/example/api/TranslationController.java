@@ -23,7 +23,7 @@ public class TranslationController {
     @GetMapping("/files")
     public Map<String, Object> listFiles(@RequestParam(value = "path", required = false) String path) throws Exception {
         List<String> files = translationService.listJsonFiles(path);
-        return Map.of("path", path == null ? "" : path, "files", files);
+        return Map.of("path", path, "files", files);
     }
 
     @PostMapping("/load")
