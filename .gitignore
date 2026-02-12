@@ -1,1 +1,8 @@
+# Local sample input
 en.json
+
+# Maven build outputs
+my-spring-war/target/
+
+# Generated translation payloads/local data
+data/
