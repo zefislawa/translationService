@@ -9,25 +9,27 @@
 <body>
     <div class="container">
         <form id="translationForm" class="form-card">
-            <!-- Success Message -->
-            <div id="successMessage" class="success-banner">
+            <div id="successMessage" class="success-banner hidden">
                 <svg class="icon success-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
                     <polyline points="22 4 12 14.01 9 11.01"></polyline>
                 </svg>
-                <span>Translation was successful</span>
+                <span id="successMessageText">Translation was successful</span>
             </div>
 
-            <!-- Header Section -->
             <div class="form-header">
+                <div class="form-group">
+                    <label class="form-label" for="pathInput">JSON directory path</label>
+                    <div class="input-row">
+                        <input id="pathInput" class="search-input" placeholder="data">
+                        <button type="button" class="btn btn-outline" id="loadFilesBtn">Load files</button>
+                    </div>
+                </div>
+
                 <div class="form-group">
                     <label class="form-label">Choose a file</label>
                     <div class="input-row">
-                        <select id="fileSelect" class="select-input">
-                            <option value="en.json">en.json</option>
-                            <option value="fr.json">fr.json</option>
-                            <option value="bg.json">bg.json</option>
-                        </select>
+                        <select id="fileSelect" class="select-input"></select>
                         <button type="button" class="btn btn-primary" id="selectFileBtn">Select</button>
                     </div>
                 </div>
@@ -55,50 +57,34 @@
                 </div>
             </div>
 
-            <!-- Table Section -->
             <div class="table-container">
                 <table class="data-table">
                     <thead>
                         <tr>
-                            <th class="col-checkbox">
-                                <input type="checkbox" id="selectAll" class="checkbox" aria-label="Select all rows">
-                            </th>
-                            <th class="col-key">Key (static)</th>
-                            <th class="col-text">Text (Editable)</th>
-                            <th class="col-source">Source Text (English)</th>
+                            <th class="col-key">Key (JSON ID)</th>
+                            <th class="col-text">Value (Editable)</th>
+                            <th class="col-source">Section</th>
                         </tr>
                     </thead>
-                    <tbody id="tableBody">
-                        <!-- Rows will be inserted here by JavaScript -->
-                    </tbody>
+                    <tbody id="tableBody"></tbody>
                 </table>
             </div>
 
-            <!-- Footer Section -->
             <div class="form-footer">
-                <button type="button" class="btn btn-outline" id="addRowBtn">
-                    <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <line x1="12" y1="5" x2="12" y2="19"></line>
-                        <line x1="5" y1="12" x2="19" y2="12"></line>
-                    </svg>
-                    Add Row
-                </button>
-
                 <div class="pagination-controls">
                     <button type="button" class="btn btn-outline btn-sm" id="prevBtn">Previous</button>
                     <span class="page-info" id="pageInfo">Page 1 of 1</span>
                     <button type="button" class="btn btn-outline btn-sm" id="nextBtn">Next</button>
                 </div>
 
-                <button type="submit" class="btn btn-primary">Submit</button>
+                <button type="submit" class="btn btn-primary">Save current rows</button>
             </div>
 
-            <!-- Translation Section -->
             <div class="translation-section">
                 <h3 class="section-title">Translate your texts</h3>
                 <div class="translation-controls">
                     <div class="form-group">
-                        <label class="form-label">Select language</label>
+                        <label class="form-label">Select target language</label>
                         <select id="targetLanguage" class="select-input">
                             <option value="es">Spanish</option>
                             <option value="fr" selected>French</option>
@@ -114,38 +100,11 @@
                     </div>
                     <div class="form-group">
                         <label class="form-label invisible">Action</label>
-                        <button type="button" class="btn btn-primary" id="translateBtn">
-                            <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <path d="m5 8 6 6"></path>
-                                <path d="m4 14 6-6 2-3"></path>
-                                <path d="M2 5h12"></path>
-                                <path d="M7 2h1"></path>
-                                <path d="m22 22-5-10-5 10"></path>
-                                <path d="M14 18h6"></path>
-                            </svg>
-                            Translate
-                        </button>
+                        <button type="button" class="btn btn-primary" id="translateBtn">Translate</button>
                     </div>
                 </div>
             </div>
         </form>
-    </div>
-
-    <!-- Edit Dialog -->
-    <div id="editDialog" class="dialog-overlay">
-        <div class="dialog-content">
-            <div class="dialog-header">
-                <h2 id="dialogTitle" class="dialog-title">Edit Text</h2>
-                <button type="button" class="dialog-close" id="closeDialog">&times;</button>
-            </div>
-            <div class="dialog-body">
-                <textarea id="editTextarea" class="textarea" placeholder="Enter value"></textarea>
-            </div>
-            <div class="dialog-footer">
-                <button type="button" class="btn btn-outline" id="cancelEdit">Cancel</button>
-                <button type="button" class="btn btn-primary" id="saveEdit">Save</button>
-            </div>
-        </div>
     </div>
 
     <script src="script.js"></script>
