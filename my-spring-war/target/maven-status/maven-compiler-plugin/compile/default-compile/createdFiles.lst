@@ -1,7 +1,0 @@
-com\example\api\dto\TranslationRow.class
-com\example\api\HealthController.class
-com\example\api\StoreController.class
-com\example\service\TranslationService.class
-com\example\MySpringWarApplication.class
-com\example\storage\JsonFileStore.class
-com\example\api\TranslationController.class
