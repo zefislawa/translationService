@@ -29,22 +29,16 @@ public class TranslationService {
     private final Path defaultDataDir;
     private final ObjectMapper mapper;
     private final RestTemplate restTemplate;
-    private final String googleProjectId;
     private final String googleApiKey;
-    private final String googleLocation;
 
     public TranslationService(
             @Value("${myapp.dataDir}") String defaultDataDir,
-            @Value("${myapp.google.projectId}") String googleProjectId,
             @Value("${myapp.google.apiKey}") String googleApiKey,
-            @Value("${myapp.google.location:global}") String googleLocation,
             ObjectMapper mapper,
             RestTemplateBuilder restTemplateBuilder
     ) throws Exception {
         this.defaultDataDir = Path.of(defaultDataDir).toAbsolutePath();
-        this.googleProjectId = googleProjectId;
         this.googleApiKey = googleApiKey;
-        this.googleLocation = googleLocation;
         this.mapper = mapper;
         this.restTemplate = restTemplateBuilder
                 .setConnectTimeout(Duration.ofSeconds(15))
@@ -133,12 +127,11 @@ public class TranslationService {
 
     private List<String> callGoogleTranslate(String sourceLanguage, String targetLanguage, List<String> contents) {
         String url = UriComponentsBuilder
-                .fromHttpUrl("https://translation.googleapis.com/v3/projects/{project}/locations/{location}:translateText")
+                .fromHttpUrl("https://translation.googleapis.com/language/translate/v2")
                 .queryParam("key", googleApiKey)
-                .buildAndExpand(googleProjectId, googleLocation)
                 .toUriString();
 
-        GoogleTranslateRequest body = new GoogleTranslateRequest(contents, sourceLanguage, targetLanguage, "text/plain");
+        GoogleTranslateRequest body = new GoogleTranslateRequest(contents, sourceLanguage, targetLanguage, "text");
 
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
@@ -150,11 +143,11 @@ public class TranslationService {
         );
 
         GoogleTranslateResponse responseBody = response.getBody();
-        if (responseBody == null || responseBody.translations() == null) {
+        if (responseBody == null || responseBody.data() == null || responseBody.data().translations() == null) {
             throw new IllegalStateException("Google Translate response is empty");
         }
 
-        return responseBody.translations()
+        return responseBody.data().translations()
                 .stream()
                 .map(GoogleTranslation::translatedText)
                 .toList();
@@ -191,14 +184,17 @@ public class TranslationService {
     }
 
     private record GoogleTranslateRequest(
-            List<String> contents,
-            String sourceLanguageCode,
-            String targetLanguageCode,
-            String mimeType
+            List<String> q,
+            String source,
+            String target,
+            String format
     ) {
     }
 
-    private record GoogleTranslateResponse(List<GoogleTranslation> translations) {
+    private record GoogleTranslateResponse(GoogleTranslateData data) {
+    }
+
+    private record GoogleTranslateData(List<GoogleTranslation> translations) {
     }
 
     private record GoogleTranslation(String translatedText) {
