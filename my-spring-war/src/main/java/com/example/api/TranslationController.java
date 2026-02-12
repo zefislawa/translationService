@@ -32,8 +32,8 @@ public class TranslationController {
     }
 
     @PostMapping("/translate")
-    public TranslationExportResult exportTranslationPayload(@RequestBody TranslationExportRequest request) throws Exception {
-        return translationService.exportGoogleTranslatePayload(
+    public TranslationExportResult translateAndStore(@RequestBody TranslationExportRequest request) throws Exception {
+        return translationService.translateAndStore(
                 request.getPath(),
                 request.getFileName(),
                 request.getTargetLanguage(),

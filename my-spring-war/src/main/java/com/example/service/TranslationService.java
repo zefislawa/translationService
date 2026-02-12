@@ -4,12 +4,18 @@ import com.example.api.dto.TranslationExportResult;
 import com.example.api.dto.TranslationRow;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.web.client.RestTemplateBuilder;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
+import org.springframework.web.client.RestTemplate;
+import org.springframework.web.util.UriComponentsBuilder;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.time.LocalDateTime;
-import java.time.format.DateTimeFormatter;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
@@ -20,14 +26,30 @@ import java.util.stream.Stream;
 @Service
 public class TranslationService {
 
-    private static final DateTimeFormatter TS_FORMAT = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss");
-
     private final Path defaultDataDir;
     private final ObjectMapper mapper;
+    private final RestTemplate restTemplate;
+    private final String googleProjectId;
+    private final String googleApiKey;
+    private final String googleLocation;
 
-    public TranslationService(@Value("${myapp.dataDir}") String defaultDataDir, ObjectMapper mapper) throws Exception {
+    public TranslationService(
+            @Value("${myapp.dataDir}") String defaultDataDir,
+            @Value("${myapp.google.projectId}") String googleProjectId,
+            @Value("${myapp.google.apiKey}") String googleApiKey,
+            @Value("${myapp.google.location:global}") String googleLocation,
+            ObjectMapper mapper,
+            RestTemplateBuilder restTemplateBuilder
+    ) throws Exception {
         this.defaultDataDir = Path.of(defaultDataDir).toAbsolutePath();
+        this.googleProjectId = googleProjectId;
+        this.googleApiKey = googleApiKey;
+        this.googleLocation = googleLocation;
         this.mapper = mapper;
+        this.restTemplate = restTemplateBuilder
+                .setConnectTimeout(Duration.ofSeconds(15))
+                .setReadTimeout(Duration.ofSeconds(60))
+                .build();
         Files.createDirectories(this.defaultDataDir);
     }
 
@@ -78,30 +100,64 @@ public class TranslationService {
         return rows;
     }
 
-    public TranslationExportResult exportGoogleTranslatePayload(String customPath, String fileName, String targetLanguage, List<TranslationRow> rows) throws Exception {
-        if (rows == null) {
-            rows = List.of();
+    public TranslationExportResult translateAndStore(String customPath, String fileName, String targetLanguage, List<TranslationRow> rows) throws Exception {
+        if (rows == null || rows.isEmpty()) {
+            throw new IllegalArgumentException("No rows provided for translation");
+        }
+        if (targetLanguage == null || targetLanguage.isBlank()) {
+            throw new IllegalArgumentException("targetLanguage is required");
         }
 
-        Path dir = resolveDataDir(customPath);
-        String cleanName = stripJsonExtension(fileName);
-        String outputFileName = cleanName + "-google-v2-" + targetLanguage + "-" + TS_FORMAT.format(LocalDateTime.now()) + ".json";
+        String sourceLanguage = extractLanguageFromFileName(fileName);
+        List<String> contents = rows.stream().map(TranslationRow::getText).toList();
+        List<String> translatedTexts = callGoogleTranslate(sourceLanguage, targetLanguage, contents);
 
-        List<String> texts = rows.stream().map(TranslationRow::getText).toList();
-        List<String> ids = rows.stream().map(r -> r.getSection() + "." + r.getKey()).toList();
+        if (translatedTexts.size() != rows.size()) {
+            throw new IllegalStateException("Google Translate returned an unexpected number of translated strings");
+        }
 
-        Map<String, Object> payload = new LinkedHashMap<>();
-        payload.put("target", targetLanguage);
-        payload.put("format", "text");
-        payload.put("q", texts);
+        Map<String, Map<String, String>> translatedPayload = new LinkedHashMap<>();
+        for (int i = 0; i < rows.size(); i++) {
+            TranslationRow row = rows.get(i);
+            translatedPayload
+                    .computeIfAbsent(row.getSection(), k -> new LinkedHashMap<>())
+                    .put(row.getKey(), translatedTexts.get(i));
+        }
 
-        // Metadata makes it easy to map translated rows back in the next integration step.
-        payload.put("ids", ids);
+        Path sourceFile = resolveJsonFile(customPath, fileName);
+        Path outputFile = sourceFile.getParent().resolve(targetLanguage + ".json").normalize();
+        mapper.writerWithDefaultPrettyPrinter().writeValue(outputFile.toFile(), translatedPayload);
 
-        Path out = dir.resolve(outputFileName);
-        mapper.writerWithDefaultPrettyPrinter().writeValue(out.toFile(), payload);
+        return new TranslationExportResult(outputFile.toAbsolutePath().toString(), targetLanguage, translatedTexts.size());
+    }
 
-        return new TranslationExportResult(out.toAbsolutePath().toString(), targetLanguage, texts.size());
+    private List<String> callGoogleTranslate(String sourceLanguage, String targetLanguage, List<String> contents) {
+        String url = UriComponentsBuilder
+                .fromHttpUrl("https://translation.googleapis.com/v3/projects/{project}/locations/{location}:translateText")
+                .queryParam("key", googleApiKey)
+                .buildAndExpand(googleProjectId, googleLocation)
+                .toUriString();
+
+        GoogleTranslateRequest body = new GoogleTranslateRequest(contents, sourceLanguage, targetLanguage, "text/plain");
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+
+        ResponseEntity<GoogleTranslateResponse> response = restTemplate.postForEntity(
+                url,
+                new HttpEntity<>(body, headers),
+                GoogleTranslateResponse.class
+        );
+
+        GoogleTranslateResponse responseBody = response.getBody();
+        if (responseBody == null || responseBody.translations() == null) {
+            throw new IllegalStateException("Google Translate response is empty");
+        }
+
+        return responseBody.translations()
+                .stream()
+                .map(GoogleTranslation::translatedText)
+                .toList();
     }
 
     private Path resolveDataDir(String customPath) throws Exception {
@@ -122,8 +178,29 @@ public class TranslationService {
         return dir.resolve(normalized).normalize();
     }
 
-    private String stripJsonExtension(String fileName) {
-        if (fileName == null || fileName.isBlank()) return "translations";
-        return fileName.replaceFirst("(?i)\\.json$", "");
+    private String extractLanguageFromFileName(String fileName) {
+        if (fileName == null || fileName.isBlank()) {
+            throw new IllegalArgumentException("fileName is required to detect source language");
+        }
+
+        String normalized = Path.of(fileName).getFileName().toString().replaceFirst("(?i)\\.json$", "");
+        if (normalized.isBlank()) {
+            throw new IllegalArgumentException("Cannot detect source language from file name: " + fileName);
+        }
+        return normalized;
+    }
+
+    private record GoogleTranslateRequest(
+            List<String> contents,
+            String sourceLanguageCode,
+            String targetLanguageCode,
+            String mimeType
+    ) {
+    }
+
+    private record GoogleTranslateResponse(List<GoogleTranslation> translations) {
+    }
+
+    private record GoogleTranslation(String translatedText) {
     }
 }
