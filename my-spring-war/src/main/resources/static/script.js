@@ -27,37 +27,14 @@ function getPathValue() {
   return (elements.pathInput.value || "").trim();
 }
 
-function getBaseName(fileName) {
-  if (!fileName) return "";
-  return fileName.replace(/\.json$/i, "");
-}
-
 async function fetchFiles() {
   const path = getPathValue();
-
-  // Keep compatibility with main branch API (GET + query param).
   const query = path ? `?path=${encodeURIComponent(path)}` : "";
-  let res = await fetch(`/api/translations/files${query}`, {
-    method: 'GET',
-    headers: { 'Accept': 'application/json' }
-  });
-
-  // Fallback: support POST variant if backend has that route.
-  if (res.status === 404 || res.status === 405) {
-    res = await fetch('/api/translations/files', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ path })
-    });
-  }
-
-  if (!res.ok) {
-    const text = await res.text().catch(() => '');
-    throw new Error(`Unable to list files (HTTP ${res.status}). ${text}`);
-  }
-
+  const res = await fetch(`/api/translations/files${query}`);
+  if (!res.ok) throw new Error(`Unable to list files (HTTP ${res.status})`);
   return res.json();
 }
+
 async function loadRows() {
   const path = getPathValue();
   selectedFile = elements.fileSelect.value;
@@ -66,26 +43,13 @@ async function loadRows() {
     throw new Error("Please load and select a file first.");
   }
 
-  // Preferred API
-  let res = await fetch('/api/translations/load', {
+  const res = await fetch('/api/translations/load', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ path, fileName: selectedFile })
   });
 
-  // Backward-compatible fallback for older backend versions.
-  if (res.status === 404 || res.status === 405) {
-    const base = getBaseName(selectedFile);
-    res = await fetch(`/api/translations/${encodeURIComponent(base)}`, {
-      method: 'GET',
-      headers: { 'Accept': 'application/json' }
-    });
-  }
-
-  if (!res.ok) {
-    const text = await res.text().catch(() => '');
-    throw new Error(`Unable to load file (HTTP ${res.status}). ${text}`);
-  }
+  if (!res.ok) throw new Error(`Unable to load file (HTTP ${res.status})`);
 
   const apiRows = await res.json();
   rows = (apiRows || []).map((r) => ({
@@ -99,6 +63,7 @@ async function loadRows() {
   renderTable();
   showSuccessMessage(`Loaded ${rows.length} rows from ${selectedFile}.`);
 }
+
 async function exportTranslatePayload() {
   const path = getPathValue();
   targetLanguage = elements.targetLanguageSelect.value;
@@ -191,7 +156,6 @@ async function handleLoadFiles() {
   const files = data.files || [];
 
   elements.fileSelect.innerHTML = '';
-
   files.forEach((name) => {
     const option = document.createElement('option');
     option.value = name;
@@ -255,7 +219,6 @@ elements.translationForm.addEventListener('submit', handleSubmit);
 document.addEventListener('DOMContentLoaded', async () => {
   try {
     await handleLoadFiles();
-
     if (elements.fileSelect.value) {
       await loadRows();
     }
