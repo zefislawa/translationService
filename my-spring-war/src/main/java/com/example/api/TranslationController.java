@@ -3,7 +3,6 @@ package com.example.api;
 import com.example.api.dto.TranslationExportRequest;
 import com.example.api.dto.TranslationExportResult;
 import com.example.api.dto.TranslationFileLoadRequest;
-import com.example.api.dto.TranslationPathRequest;
 import com.example.api.dto.TranslationRow;
 import com.example.service.TranslationService;
 import org.springframework.web.bind.annotation.*;
@@ -21,14 +20,8 @@ public class TranslationController {
         this.translationService = translationService;
     }
 
-    @GetMapping("/{file}")
-    public List<TranslationRow> getRowsLegacy(@PathVariable("file") String file) throws Exception {
-        return translationService.loadRows(file);
-    }
-
-    @PostMapping("/files")
-    public Map<String, Object> listFiles(@RequestBody(required = false) TranslationPathRequest request) throws Exception {
-        String path = request == null ? null : request.getPath();
+    @GetMapping("/files")
+    public Map<String, Object> listFiles(@RequestParam(value = "path", required = false) String path) throws Exception {
         List<String> files = translationService.listJsonFiles(path);
         return Map.of("path", path == null ? "" : path, "files", files);
     }

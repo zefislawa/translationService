@@ -44,10 +44,6 @@ public class TranslationService {
         }
     }
 
-    public List<TranslationRow> loadRows(String fileName) throws Exception {
-        return loadRows(null, fileName);
-    }
-
     @SuppressWarnings("unchecked")
     public List<TranslationRow> loadRows(String customPath, String fileName) throws Exception {
         Path file = resolveJsonFile(customPath, fileName);

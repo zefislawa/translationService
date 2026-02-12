@@ -35,24 +35,28 @@ function getBaseName(fileName) {
 async function fetchFiles() {
   const path = getPathValue();
 
-  // Preferred API: POST with JSON body (handles Windows paths safely).
-  const res = await fetch('/api/translations/files', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ path })
+  // Keep compatibility with main branch API (GET + query param).
+  const query = path ? `?path=${encodeURIComponent(path)}` : "";
+  let res = await fetch(`/api/translations/files${query}`, {
+    method: 'GET',
+    headers: { 'Accept': 'application/json' }
   });
 
-  if (res.ok) {
-    return res.json();
-  }
-
-  // Backward-compatible fallback for older backend versions.
+  // Fallback: support POST variant if backend has that route.
   if (res.status === 404 || res.status === 405) {
-    return { path, files: [] };
+    res = await fetch('/api/translations/files', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path })
+    });
   }
 
-  const text = await res.text().catch(() => '');
-  throw new Error(`Unable to list files (HTTP ${res.status}). ${text}`);
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    throw new Error(`Unable to list files (HTTP ${res.status}). ${text}`);
+  }
+
+  return res.json();
 }
 async function loadRows() {
   const path = getPathValue();
