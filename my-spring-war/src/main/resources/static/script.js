@@ -64,7 +64,7 @@ async function loadRows() {
   showSuccessMessage(`Loaded ${rows.length} rows from ${selectedFile}.`);
 }
 
-async function exportTranslatePayload() {
+async function translateAndStore() {
   const path = getPathValue();
   targetLanguage = elements.targetLanguageSelect.value;
 
@@ -85,7 +85,7 @@ async function exportTranslatePayload() {
     })
   });
 
-  if (!res.ok) throw new Error(`Failed to generate translation payload (HTTP ${res.status})`);
+  if (!res.ok) throw new Error(`Failed to translate text via Google API (HTTP ${res.status})`);
   return res.json();
 }
 
@@ -185,13 +185,13 @@ async function handleTranslate() {
     return;
   }
 
-  const result = await exportTranslatePayload();
-  showSuccessMessage(`Google V2 payload created: ${result.outputFile}`);
+  const result = await translateAndStore();
+  showSuccessMessage(`Translation saved: ${result.outputFile}`);
 }
 
 function handleSubmit(e) {
   e.preventDefault();
-  showSuccessMessage('Edits are in memory. Click Translate to export JSON payload.');
+  showSuccessMessage('Edits are in memory. Click Translate to call Google and save translated JSON.');
 }
 
 elements.loadFilesBtn.addEventListener('click', () => handleLoadFiles().catch((e) => alert(e.message)));
