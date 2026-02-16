@@ -8,6 +8,7 @@ import com.example.api.dto.TranslationRow;
 import com.example.service.TranslationService;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -24,7 +25,10 @@ public class TranslationController {
     @GetMapping("/files")
     public Map<String, Object> listFiles(@RequestParam(value = "path", required = false) String path) throws Exception {
         List<String> files = translationService.listJsonFiles(path);
-        return Map.of("path", path, "files", files);
+        Map<String, Object> response = new LinkedHashMap<>();
+        response.put("path", path);
+        response.put("files", files);
+        return response;
     }
 
     @GetMapping("/supported-languages")

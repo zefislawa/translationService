@@ -3,6 +3,9 @@ package com.example.service;
 import com.example.api.dto.TranslationExportResult;
 import com.example.api.dto.TranslationRow;
 import com.example.api.dto.SupportedLanguage;
+import com.fasterxml.jackson.annotation.JsonAlias;
+import com.fasterxml.jackson.annotation.JsonCreator;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.web.client.RestTemplateBuilder;
@@ -242,5 +245,13 @@ public class TranslationService {
             String languageCode,
             String displayName
     ) {
+        @JsonCreator
+        private GoogleSupportedLanguage(
+                @JsonProperty("language") @JsonAlias("languageCode") String languageCode,
+                @JsonProperty("name") @JsonAlias("displayName") String displayName
+        ) {
+            this.languageCode = languageCode;
+            this.displayName = displayName;
+        }
     }
 }
