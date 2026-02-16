@@ -6,3 +6,6 @@ my-spring-war/target/
 
 # Generated translation payloads/local data
 data/
+
+# Local environment-specific configuration
+my-spring-war/local.properties

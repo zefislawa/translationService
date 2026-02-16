@@ -171,6 +171,7 @@ public class TranslationService {
     }
 
     public List<SupportedLanguage> getSupportedLanguages() {
+        requireGoogleApiKey();
         String url = UriComponentsBuilder
                 .fromHttpUrl("https://translation.googleapis.com/language/translate/v2/languages")
                 .queryParam("key", googleApiKey)
@@ -195,6 +196,7 @@ public class TranslationService {
     }
 
     private List<String> callGoogleTranslate(String sourceLanguage, String targetLanguage, List<String> contents) {
+        requireGoogleApiKey();
         String url = UriComponentsBuilder
                 .fromHttpUrl("https://translation.googleapis.com/language/translate/v2")
                 .queryParam("key", googleApiKey)
@@ -220,6 +222,12 @@ public class TranslationService {
                 .stream()
                 .map(GoogleTranslation::translatedText)
                 .toList();
+    }
+
+    private void requireGoogleApiKey() {
+        if (googleApiKey == null || googleApiKey.isBlank()) {
+            throw new IllegalStateException("Google API key is missing. Configure it via environment variable or local.properties");
+        }
     }
 
     private Path resolveDataDir(String customPath) throws Exception {

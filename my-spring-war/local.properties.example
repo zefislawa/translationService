@@ -1,0 +1,9 @@
+# Copy this file to my-spring-war/local.properties and adjust values for your environment.
+# This file is intentionally committed as an example; local.properties is gitignored.
+# You can also override any value with environment variables shown in application.properties.
+
+myapp.local.dataDir=data
+myapp.local.googleApiKey=replace-with-your-google-translate-api-key
+myapp.local.googleProjectId=your-google-project-id
+myapp.local.googleDisplayLanguage=en
+myapp.local.uiPreferredTargetLanguage=fr
