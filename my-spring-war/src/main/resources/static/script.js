@@ -147,7 +147,8 @@ function getPaginatedRows() {
 function renderTable() {
   const paginatedRows = getPaginatedRows();
   elements.tableBody.innerHTML = '';
-  updateSelectAllRowsCheckbox();
+  const areAllRowsSelected = rows.length > 0 && rows.every((row) => row.selected !== false);
+  elements.selectAllRows.checked = areAllRowsSelected;
 
   paginatedRows.forEach((row) => {
     const tr = document.createElement('tr');
@@ -155,12 +156,13 @@ function renderTable() {
     const checkboxTd = document.createElement('td');
     const rowCheckbox = document.createElement('input');
     rowCheckbox.type = 'checkbox';
-    rowCheckbox.className = 'checkbox row-checkbox';
+    rowCheckbox.className = 'checkbox';
     rowCheckbox.setAttribute('aria-label', `Select row ${row.column1 || 'new label'}`);
     rowCheckbox.checked = row.selected !== false;
     rowCheckbox.addEventListener('change', (e) => {
       row.selected = e.target.checked;
-      updateSelectAllRowsCheckbox();
+      const allRowsSelected = rows.length > 0 && rows.every((item) => item.selected !== false);
+      elements.selectAllRows.checked = allRowsSelected;
     });
     checkboxTd.appendChild(rowCheckbox);
     tr.appendChild(checkboxTd);
@@ -259,11 +261,6 @@ function handleSelectAllRows(e) {
     row.selected = isChecked;
   });
   renderTable();
-}
-
-function updateSelectAllRowsCheckbox() {
-  const areAllRowsSelected = rows.length > 0 && rows.every((row) => row.selected !== false);
-  elements.selectAllRows.checked = areAllRowsSelected;
 }
 
 function showSuccessMessage(message) {
