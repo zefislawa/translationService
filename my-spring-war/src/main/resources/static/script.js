@@ -90,7 +90,6 @@ async function loadRows() {
     section: r.section || "",
     column1: r.key || "",
     column2: r.text || "",
-    englishReference: r.englishReference || "",
     selected: true
   }));
 
@@ -131,8 +130,7 @@ function getFilteredRows() {
   return rows.filter((row) =>
     row.column1.toLowerCase().includes(q) ||
     row.column2.toLowerCase().includes(q) ||
-    row.section.toLowerCase().includes(q) ||
-    (row.englishReference || '').toLowerCase().includes(q)
+    row.section.toLowerCase().includes(q)
   );
 }
 
@@ -195,15 +193,6 @@ function renderTable() {
     expandBtn.type = 'button';
     expandBtn.className = 'btn btn-outline btn-sm';
     expandBtn.textContent = 'Expand';
-    expandBtn.classList.add('expand-icon-btn');
-    expandBtn.setAttribute('aria-label', `Expand value for ${row.column1}`);
-    expandBtn.innerHTML = `
-      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <polyline points="15 3 21 3 21 9"></polyline>
-        <polyline points="9 21 3 21 3 15"></polyline>
-        <line x1="21" y1="3" x2="14" y2="10"></line>
-        <line x1="3" y1="21" x2="10" y2="14"></line>
-      </svg>`;
     expandBtn.addEventListener('click', () => openValueDialog(row));
 
     valueInputContainer.appendChild(input);
@@ -212,7 +201,7 @@ function renderTable() {
     tr.appendChild(valueTd);
 
     const sectionTd = document.createElement('td');
-    sectionTd.textContent = row.englishReference || '';
+    sectionTd.textContent = row.section;
     tr.appendChild(sectionTd);
 
     const actionsTd = document.createElement('td');
@@ -389,11 +378,6 @@ elements.valueDialog.addEventListener('click', (e) => {
 
 document.addEventListener('DOMContentLoaded', async () => {
   try {
-    const englishHeader = document.querySelector('th.col-source');
-    if (englishHeader) {
-      englishHeader.textContent = 'English reference';
-    }
-
     await handleLoadFiles();
     if (elements.fileSelect.value) {
       await loadRows();
