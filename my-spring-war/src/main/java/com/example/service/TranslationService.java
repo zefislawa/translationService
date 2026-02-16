@@ -3,6 +3,7 @@ package com.example.service;
 import com.example.api.dto.TranslationExportResult;
 import com.example.api.dto.TranslationRow;
 import com.example.api.dto.SupportedLanguage;
+import com.fasterxml.jackson.annotation.JsonAlias;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.web.client.RestTemplateBuilder;
@@ -135,10 +136,9 @@ public class TranslationService {
 
     public List<SupportedLanguage> getSupportedLanguages() {
         String url = UriComponentsBuilder
-                .fromHttpUrl("https://translation.googleapis.com/v3/projects/{projectId}/locations/global/supportedLanguages")
+                .fromHttpUrl("https://translation.googleapis.com/language/translate/v2/languages")
                 .queryParam("key", googleApiKey)
-                .queryParam("displayLanguageCode", displayLanguageCode)
-                .buildAndExpand(googleProjectId)
+                .queryParam("target", displayLanguageCode)
                 .toUriString();
 
         ResponseEntity<GoogleSupportedLanguagesResponse> response = restTemplate.getForEntity(
@@ -147,12 +147,11 @@ public class TranslationService {
         );
 
         GoogleSupportedLanguagesResponse responseBody = response.getBody();
-        if (responseBody == null || responseBody.languages() == null) {
+        if (responseBody == null || responseBody.data() == null || responseBody.data().languages() == null) {
             throw new IllegalStateException("Google supported languages response is empty");
         }
 
-        return responseBody.languages().stream()
-                .filter(language -> Boolean.TRUE.equals(language.supportTarget()))
+        return responseBody.data().languages().stream()
                 .filter(language -> language.languageCode() != null && !language.languageCode().isBlank())
                 .map(language -> new SupportedLanguage(language.languageCode(), Objects.requireNonNullElse(language.displayName(), language.languageCode())))
                 .sorted(Comparator.comparing(SupportedLanguage::displayName, String.CASE_INSENSITIVE_ORDER))
@@ -234,14 +233,15 @@ public class TranslationService {
     private record GoogleTranslation(String translatedText) {
     }
 
-    private record GoogleSupportedLanguagesResponse(List<GoogleSupportedLanguage> languages) {
+    private record GoogleSupportedLanguagesResponse(GoogleSupportedLanguagesData data) {
+    }
+
+    private record GoogleSupportedLanguagesData(List<GoogleSupportedLanguage> languages) {
     }
 
     private record GoogleSupportedLanguage(
-            String languageCode,
-            String displayName,
-            Boolean supportSource,
-            Boolean supportTarget
+            @JsonAlias({"languageCode", "language"}) String languageCode,
+            @JsonAlias({"displayName", "name"}) String displayName
     ) {
     }
 }
