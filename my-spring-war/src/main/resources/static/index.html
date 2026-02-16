@@ -61,9 +61,13 @@
                 <table class="data-table">
                     <thead>
                         <tr>
+                            <th class="col-checkbox">
+                                <input type="checkbox" id="selectAllRows" class="checkbox" aria-label="Select all rows">
+                            </th>
                             <th class="col-key">Key (JSON ID)</th>
                             <th class="col-text">Value (Editable)</th>
                             <th class="col-source">Section</th>
+                            <th class="col-actions">Actions</th>
                         </tr>
                     </thead>
                     <tbody id="tableBody"></tbody>
@@ -76,8 +80,10 @@
                     <span class="page-info" id="pageInfo">Page 1 of 1</span>
                     <button type="button" class="btn btn-outline btn-sm" id="nextBtn">Next</button>
                 </div>
-
-                <button type="submit" class="btn btn-primary">Save current rows</button>
+                <div class="footer-actions">
+                    <button type="button" class="btn btn-outline" id="newLabelBtn">New label</button>
+                    <button type="submit" class="btn btn-primary">Save current rows</button>
+                </div>
             </div>
 
             <div class="translation-section">
@@ -96,6 +102,22 @@
                 </div>
             </div>
         </form>
+    </div>
+
+    <div id="valueDialog" class="dialog-overlay" aria-hidden="true">
+        <div class="dialog-content">
+            <div class="dialog-header">
+                <h4 class="dialog-title" id="valueDialogTitle">Edit value</h4>
+                <button type="button" id="closeValueDialog" class="dialog-close" aria-label="Close">&times;</button>
+            </div>
+            <div class="dialog-body">
+                <textarea id="valueDialogTextarea" class="textarea"></textarea>
+            </div>
+            <div class="dialog-footer">
+                <button type="button" class="btn btn-outline" id="cancelValueDialog">Cancel</button>
+                <button type="button" class="btn btn-primary" id="saveValueDialog">Apply</button>
+            </div>
+        </div>
     </div>
 
     <script src="script.js"></script>
