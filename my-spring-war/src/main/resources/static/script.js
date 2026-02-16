@@ -5,11 +5,11 @@ let targetLanguage = "";
 let rowsPerPage = 10;
 let currentPage = 1;
 let editingRow = null;
+let preferredTargetLanguage = "";
 
 const elements = {
   successMessage: document.getElementById('successMessage'),
   successMessageText: document.getElementById('successMessageText'),
-  pathInput: document.getElementById('pathInput'),
   loadFilesBtn: document.getElementById('loadFilesBtn'),
   fileSelect: document.getElementById('fileSelect'),
   selectFileBtn: document.getElementById('selectFileBtn'),
@@ -32,15 +32,15 @@ const elements = {
   saveValueDialog: document.getElementById('saveValueDialog')
 };
 
-function getPathValue() {
-  return (elements.pathInput.value || "").trim();
+async function fetchFiles() {
+  const res = await fetch('/api/translations/files');
+  if (!res.ok) throw new Error(`Unable to list files (HTTP ${res.status})`);
+  return res.json();
 }
 
-async function fetchFiles() {
-  const path = getPathValue();
-  const query = path ? `?path=${encodeURIComponent(path)}` : "";
-  const res = await fetch(`/api/translations/files${query}`);
-  if (!res.ok) throw new Error(`Unable to list files (HTTP ${res.status})`);
+async function fetchUiConfig() {
+  const res = await fetch('/api/config');
+  if (!res.ok) throw new Error(`Unable to load UI config (HTTP ${res.status})`);
   return res.json();
 }
 
@@ -60,7 +60,7 @@ function renderSupportedLanguages(languages) {
     elements.targetLanguageSelect.appendChild(option);
   });
 
-  const preferredLanguage = 'fr';
+  const preferredLanguage = preferredTargetLanguage;
   const hasPreferredLanguage = (languages || []).some((language) => language.languageCode === preferredLanguage);
   targetLanguage = hasPreferredLanguage ? preferredLanguage : (languages[0]?.languageCode || '');
   if (targetLanguage) {
@@ -69,7 +69,6 @@ function renderSupportedLanguages(languages) {
 }
 
 async function loadRows() {
-  const path = getPathValue();
   selectedFile = elements.fileSelect.value;
 
   if (!selectedFile) {
@@ -79,7 +78,7 @@ async function loadRows() {
   const res = await fetch('/api/translations/load', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ path, fileName: selectedFile })
+    body: JSON.stringify({ fileName: selectedFile })
   });
 
   if (!res.ok) throw new Error(`Unable to load file (HTTP ${res.status})`);
@@ -100,8 +99,6 @@ async function loadRows() {
 }
 
 async function translateAndStore(targetLanguage) {
-  const path = getPathValue();
-
   const payloadRows = rows
     .filter((r) => r.selected !== false)
     .map((r) => ({
@@ -114,7 +111,6 @@ async function translateAndStore(targetLanguage) {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      path,
       fileName: selectedFile,
       targetLanguage,
       rows: payloadRows
@@ -275,6 +271,9 @@ function showSuccessMessage(message) {
 }
 
 async function handleLoadFiles() {
+  const uiConfig = await fetchUiConfig();
+  preferredTargetLanguage = (uiConfig.preferredTargetLanguage || '').trim();
+
   const supportedLanguages = await fetchSupportedLanguages();
   renderSupportedLanguages(supportedLanguages);
 
