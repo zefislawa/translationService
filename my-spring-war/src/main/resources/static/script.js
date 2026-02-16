@@ -193,7 +193,9 @@ function renderTable() {
 
     const expandBtn = document.createElement('button');
     expandBtn.type = 'button';
-    expandBtn.className = 'btn-icon expand-icon-btn';
+    expandBtn.className = 'btn btn-outline btn-sm';
+    expandBtn.textContent = 'Expand';
+    expandBtn.classList.add('expand-icon-btn');
     expandBtn.setAttribute('aria-label', `Expand value for ${row.column1}`);
     expandBtn.innerHTML = `
       <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -388,6 +390,11 @@ elements.valueDialog.addEventListener('click', (e) => {
 
 document.addEventListener('DOMContentLoaded', async () => {
   try {
+    const englishHeader = document.querySelector('th.col-source');
+    if (englishHeader) {
+      englishHeader.textContent = 'English reference';
+    }
+
     await handleLoadFiles();
     if (elements.fileSelect.value) {
       await loadRows();
