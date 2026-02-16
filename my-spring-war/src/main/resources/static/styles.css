@@ -246,7 +246,11 @@ body {
 }
 
 .col-source {
-    width: 30%;
+    width: 25%;
+}
+
+.col-actions {
+    width: 120px;
 }
 
 .data-table tbody tr:hover {
@@ -277,19 +281,37 @@ body {
     gap: 8px;
 }
 
+.expand-icon-btn {
+    border: 1px solid #d1d5db;
+    background: #fff;
+    width: 32px;
+    height: 32px;
+    flex-shrink: 0;
+}
+
+.expand-icon-btn:hover {
+    background-color: #f9fafb;
+    color: #1d4ed8;
+}
+
 .cell-input {
     flex: 1;
-    border: none;
-    background: transparent;
+    border: 1px solid #d1d5db;
+    background: white;
     padding: 8px;
     font-size: 14px;
     outline: none;
     color: #374151;
+    border-radius: 4px;
 }
 
 .cell-input:focus {
     box-shadow: 0 0 0 1px #3b82f6;
-    border-radius: 4px;
+}
+
+.cell-textarea {
+    min-height: 38px;
+    resize: vertical;
 }
 
 /* Footer */
@@ -299,6 +321,11 @@ body {
     justify-content: space-between;
     padding: 16px;
     border-top: 1px solid #e5e7eb;
+}
+
+.footer-actions {
+    display: flex;
+    gap: 12px;
 }
 
 .pagination-controls {
@@ -430,6 +457,15 @@ body {
         gap: 12px;
     }
 
+    .footer-actions {
+        justify-content: stretch;
+    }
+
+    .footer-actions .btn {
+        flex: 1;
+        justify-content: center;
+    }
+
     .pagination-controls {
         justify-content: center;
     }
@@ -442,4 +478,5 @@ body {
     .select-input {
         width: 100%;
     }
+
 }

@@ -78,6 +78,8 @@ public class TranslationService {
             return List.of();
         }
 
+        Path englishFile = resolveJsonFile(customPath, "en.json");
+
         Object raw = mapper.readValue(file.toFile(), Object.class);
         if (raw == null) return List.of();
 
@@ -86,6 +88,7 @@ public class TranslationService {
         }
 
         List<TranslationRow> rows = new ArrayList<>();
+        Map<String, Map<String, String>> englishBySection = readSectionMap(englishFile);
 
         for (Map.Entry<?, ?> sectionEntry : top.entrySet()) {
             String section = String.valueOf(sectionEntry.getKey());
@@ -98,11 +101,42 @@ public class TranslationService {
             for (Map.Entry<?, ?> kv : sectionMap.entrySet()) {
                 String key = String.valueOf(kv.getKey());
                 String text = kv.getValue() == null ? "" : String.valueOf(kv.getValue());
-                rows.add(new TranslationRow(section, key, text));
+                String englishReference = englishBySection
+                        .getOrDefault(section, Map.of())
+                        .getOrDefault(key, "");
+                rows.add(new TranslationRow(section, key, text, englishReference));
             }
         }
 
         return rows;
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Map<String, String>> readSectionMap(Path file) throws Exception {
+        if (!Files.exists(file)) {
+            return Map.of();
+        }
+
+        Object raw = mapper.readValue(file.toFile(), Object.class);
+        if (!(raw instanceof Map<?, ?> top)) {
+            return Map.of();
+        }
+
+        Map<String, Map<String, String>> result = new LinkedHashMap<>();
+        for (Map.Entry<?, ?> sectionEntry : top.entrySet()) {
+            String section = String.valueOf(sectionEntry.getKey());
+            Object sectionVal = sectionEntry.getValue();
+            if (!(sectionVal instanceof Map<?, ?> sectionMap)) {
+                continue;
+            }
+
+            Map<String, String> values = new LinkedHashMap<>();
+            for (Map.Entry<?, ?> kv : sectionMap.entrySet()) {
+                values.put(String.valueOf(kv.getKey()), kv.getValue() == null ? "" : String.valueOf(kv.getValue()));
+            }
+            result.put(section, values);
+        }
+        return result;
     }
 
     public TranslationExportResult translateAndStore(String customPath, String fileName, String targetLanguage, List<TranslationRow> rows) throws Exception {
