@@ -4,6 +4,7 @@ let selectedFile = "";
 let targetLanguage = "";
 let rowsPerPage = 10;
 let currentPage = 1;
+let editingRow = null;
 
 const elements = {
   successMessage: document.getElementById('successMessage'),
@@ -18,9 +19,17 @@ const elements = {
   prevBtn: document.getElementById('prevBtn'),
   nextBtn: document.getElementById('nextBtn'),
   pageInfo: document.getElementById('pageInfo'),
+  selectAllRows: document.getElementById('selectAllRows'),
   targetLanguageSelect: document.getElementById('targetLanguage'),
   translateBtn: document.getElementById('translateBtn'),
-  translationForm: document.getElementById('translationForm')
+  translationForm: document.getElementById('translationForm'),
+  newLabelBtn: document.getElementById('newLabelBtn'),
+  valueDialog: document.getElementById('valueDialog'),
+  valueDialogTitle: document.getElementById('valueDialogTitle'),
+  valueDialogTextarea: document.getElementById('valueDialogTextarea'),
+  closeValueDialog: document.getElementById('closeValueDialog'),
+  cancelValueDialog: document.getElementById('cancelValueDialog'),
+  saveValueDialog: document.getElementById('saveValueDialog')
 };
 
 function getPathValue() {
@@ -80,7 +89,9 @@ async function loadRows() {
     id: `${r.section}.${r.key}`,
     section: r.section || "",
     column1: r.key || "",
-    column2: r.text || ""
+    column2: r.text || "",
+    englishReference: r.englishReference || "",
+    selected: true
   }));
 
   currentPage = 1;
@@ -88,15 +99,16 @@ async function loadRows() {
   showSuccessMessage(`Loaded ${rows.length} rows from ${selectedFile}.`);
 }
 
-async function translateAndStore() {
+async function translateAndStore(targetLanguage) {
   const path = getPathValue();
-  targetLanguage = elements.targetLanguageSelect.value;
 
-  const payloadRows = rows.map((r) => ({
-    section: r.section,
-    key: r.column1,
-    text: r.column2
-  }));
+  const payloadRows = rows
+    .filter((r) => r.selected !== false)
+    .map((r) => ({
+      section: r.section,
+      key: r.column1,
+      text: r.column2
+    }));
 
   const res = await fetch('/api/translations/translate', {
     method: 'POST',
@@ -119,7 +131,8 @@ function getFilteredRows() {
   return rows.filter((row) =>
     row.column1.toLowerCase().includes(q) ||
     row.column2.toLowerCase().includes(q) ||
-    row.section.toLowerCase().includes(q)
+    row.section.toLowerCase().includes(q) ||
+    row.englishReference.toLowerCase().includes(q)
   );
 }
 
@@ -136,28 +149,85 @@ function getPaginatedRows() {
 function renderTable() {
   const paginatedRows = getPaginatedRows();
   elements.tableBody.innerHTML = '';
+  const areAllRowsSelected = rows.length > 0 && rows.every((row) => row.selected !== false);
+  elements.selectAllRows.checked = areAllRowsSelected;
 
   paginatedRows.forEach((row) => {
     const tr = document.createElement('tr');
 
+    const checkboxTd = document.createElement('td');
+    const rowCheckbox = document.createElement('input');
+    rowCheckbox.type = 'checkbox';
+    rowCheckbox.className = 'checkbox';
+    rowCheckbox.checked = row.selected !== false;
+    rowCheckbox.addEventListener('change', (e) => {
+      row.selected = e.target.checked;
+      const allRowsSelected = rows.length > 0 && rows.every((item) => item.selected !== false);
+      elements.selectAllRows.checked = allRowsSelected;
+    });
+    checkboxTd.appendChild(rowCheckbox);
+    tr.appendChild(checkboxTd);
+
     const keyTd = document.createElement('td');
-    keyTd.textContent = row.column1;
+    const keyInput = document.createElement('input');
+    keyInput.type = 'text';
+    keyInput.className = 'cell-input';
+    keyInput.value = row.column1;
+    keyInput.addEventListener('input', (e) => {
+      row.column1 = e.target.value;
+    });
+    keyTd.appendChild(keyInput);
     tr.appendChild(keyTd);
 
     const valueTd = document.createElement('td');
-    const input = document.createElement('input');
-    input.type = 'text';
-    input.className = 'cell-input';
+    const valueInputContainer = document.createElement('div');
+    valueInputContainer.className = 'cell-input-container';
+
+    const input = document.createElement('textarea');
+    input.className = 'cell-input cell-textarea';
+    input.rows = 1;
     input.value = row.column2;
     input.addEventListener('input', (e) => {
       row.column2 = e.target.value;
     });
-    valueTd.appendChild(input);
+
+    const expandBtn = document.createElement('button');
+    expandBtn.type = 'button';
+    expandBtn.className = 'btn-icon expand-icon-btn';
+    expandBtn.setAttribute('aria-label', `Expand value for ${row.column1}`);
+    expandBtn.innerHTML = `
+      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <polyline points="15 3 21 3 21 9"></polyline>
+        <polyline points="9 21 3 21 3 15"></polyline>
+        <line x1="21" y1="3" x2="14" y2="10"></line>
+        <line x1="3" y1="21" x2="10" y2="14"></line>
+      </svg>`;
+    expandBtn.addEventListener('click', () => openValueDialog(row));
+
+    valueInputContainer.appendChild(input);
+    valueInputContainer.appendChild(expandBtn);
+    valueTd.appendChild(valueInputContainer);
     tr.appendChild(valueTd);
 
     const sectionTd = document.createElement('td');
-    sectionTd.textContent = row.section;
+    sectionTd.textContent = row.englishReference;
     tr.appendChild(sectionTd);
+
+    const actionsTd = document.createElement('td');
+    const removeBtn = document.createElement('button');
+    removeBtn.type = 'button';
+    removeBtn.className = 'btn btn-outline btn-sm';
+    removeBtn.textContent = 'Delete';
+    removeBtn.addEventListener('click', () => {
+      rows = rows.filter((item) => item.id !== row.id);
+      const totalPagesAfterDelete = getTotalPages();
+      if (currentPage > totalPagesAfterDelete) {
+        currentPage = totalPagesAfterDelete;
+      }
+      renderTable();
+    });
+    actionsTd.appendChild(removeBtn);
+    tr.appendChild(actionsTd);
 
     elements.tableBody.appendChild(tr);
   });
@@ -166,6 +236,37 @@ function renderTable() {
   elements.pageInfo.textContent = `Page ${currentPage} of ${totalPages}`;
   elements.prevBtn.disabled = currentPage <= 1;
   elements.nextBtn.disabled = currentPage >= totalPages;
+}
+
+function openValueDialog(row) {
+  editingRow = row;
+  elements.valueDialogTitle.textContent = `Edit value for ${row.column1 || 'new label'}`;
+  elements.valueDialogTextarea.value = row.column2 || '';
+  elements.valueDialog.classList.add('show');
+  elements.valueDialog.setAttribute('aria-hidden', 'false');
+  elements.valueDialogTextarea.focus();
+}
+
+function closeValueDialog() {
+  editingRow = null;
+  elements.valueDialog.classList.remove('show');
+  elements.valueDialog.setAttribute('aria-hidden', 'true');
+}
+
+function saveValueDialog() {
+  if (editingRow) {
+    editingRow.column2 = elements.valueDialogTextarea.value;
+    renderTable();
+  }
+  closeValueDialog();
+}
+
+function handleSelectAllRows(e) {
+  const isChecked = e.target.checked;
+  rows.forEach((row) => {
+    row.selected = isChecked;
+  });
+  renderTable();
 }
 
 function showSuccessMessage(message) {
@@ -212,9 +313,41 @@ async function handleTranslate() {
     return;
   }
 
-  const result = await translateAndStore();
-  showSuccessMessage(`Translation saved: ${result.outputFile}`);
+  targetLanguage = elements.targetLanguageSelect.value;
+  if (!targetLanguage) {
+    alert('Please select a target language.');
+    return;
+  }
+
+  const selectedRows = rows.filter((row) => row.selected !== false);
+  if (selectedRows.length === 0) {
+    alert('Please select at least one label row to translate.');
+    return;
+  }
+
+  const result = await translateAndStore(targetLanguage);
+
+  await handleLoadFiles();
+  showSuccessMessage(
+    `Translation saved for ${targetLanguage}. ` +
+    `Successfully translated ${Number(result.textCount || 0)} labels/rows. File: ${result.outputFile}`
+  );
 }
+
+function handleAddNewLabel() {
+  const newRow = {
+    id: `new-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    section: 'custom',
+    column1: '',
+    column2: '',
+    englishReference: '',
+    selected: true
+  };
+  rows.unshift(newRow);
+  currentPage = 1;
+  renderTable();
+}
+
 
 function handleSubmit(e) {
   e.preventDefault();
@@ -225,6 +358,7 @@ elements.loadFilesBtn.addEventListener('click', () => handleLoadFiles().catch((e
 elements.selectFileBtn.addEventListener('click', () => loadRows().catch((e) => alert(e.message)));
 elements.searchInput.addEventListener('input', handleSearch);
 elements.rowsPerPageSelect.addEventListener('change', handleRowsPerPageChange);
+elements.newLabelBtn.addEventListener('click', handleAddNewLabel);
 elements.prevBtn.addEventListener('click', () => {
   if (currentPage > 1) {
     currentPage -= 1;
@@ -237,11 +371,20 @@ elements.nextBtn.addEventListener('click', () => {
     renderTable();
   }
 });
+elements.selectAllRows.addEventListener('change', handleSelectAllRows);
 elements.targetLanguageSelect.addEventListener('change', () => {
   targetLanguage = elements.targetLanguageSelect.value;
 });
 elements.translateBtn.addEventListener('click', () => handleTranslate().catch((e) => alert(e.message)));
 elements.translationForm.addEventListener('submit', handleSubmit);
+elements.closeValueDialog.addEventListener('click', closeValueDialog);
+elements.cancelValueDialog.addEventListener('click', closeValueDialog);
+elements.saveValueDialog.addEventListener('click', saveValueDialog);
+elements.valueDialog.addEventListener('click', (e) => {
+  if (e.target === elements.valueDialog) {
+    closeValueDialog();
+  }
+});
 
 document.addEventListener('DOMContentLoaded', async () => {
   try {
