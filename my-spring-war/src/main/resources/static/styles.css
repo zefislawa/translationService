@@ -281,6 +281,19 @@ body {
     gap: 8px;
 }
 
+.expand-icon-btn {
+    border: 1px solid #d1d5db;
+    background: #fff;
+    width: 32px;
+    height: 32px;
+    flex-shrink: 0;
+}
+
+.expand-icon-btn:hover {
+    background-color: #f9fafb;
+    color: #1d4ed8;
+}
+
 .cell-input {
     flex: 1;
     border: 1px solid #d1d5db;

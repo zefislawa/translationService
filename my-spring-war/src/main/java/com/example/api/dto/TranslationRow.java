@@ -4,6 +4,7 @@ public class TranslationRow {
     private String section;
     private String key;
     private String text;
+    private String englishReference;
 
     public TranslationRow() {}
 
@@ -11,6 +12,13 @@ public class TranslationRow {
         this.section = section;
         this.key = key;
         this.text = text;
+    }
+
+    public TranslationRow(String section, String key, String text, String englishReference) {
+        this.section = section;
+        this.key = key;
+        this.text = text;
+        this.englishReference = englishReference;
     }
 
     public String getSection() { return section; }
@@ -21,4 +29,7 @@ public class TranslationRow {
 
     public String getText() { return text; }
     public void setText(String text) { this.text = text; }
+
+    public String getEnglishReference() { return englishReference; }
+    public void setEnglishReference(String englishReference) { this.englishReference = englishReference; }
 }
