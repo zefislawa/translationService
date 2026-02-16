@@ -157,7 +157,6 @@ function renderTable() {
     const rowCheckbox = document.createElement('input');
     rowCheckbox.type = 'checkbox';
     rowCheckbox.className = 'checkbox';
-    rowCheckbox.setAttribute('aria-label', `Select row ${row.column1 || 'new label'}`);
     rowCheckbox.checked = row.selected !== false;
     rowCheckbox.addEventListener('change', (e) => {
       row.selected = e.target.checked;
@@ -185,8 +184,6 @@ function renderTable() {
     const input = document.createElement('textarea');
     input.className = 'cell-input cell-textarea';
     input.rows = 1;
-    input.placeholder = 'Enter value';
-    input.setAttribute('aria-label', `Value for ${row.column1 || 'new label'}`);
     input.value = row.column2;
     input.addEventListener('input', (e) => {
       row.column2 = e.target.value;
