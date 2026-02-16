@@ -203,6 +203,18 @@ body {
     stroke-width: 2;
 }
 
+.sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+}
+
 /* Table */
 .table-container {
     overflow-x: auto;
@@ -246,7 +258,11 @@ body {
 }
 
 .col-source {
-    width: 30%;
+    width: 20%;
+}
+
+.col-actions {
+    width: 120px;
 }
 
 .data-table tbody tr:hover {
@@ -279,17 +295,22 @@ body {
 
 .cell-input {
     flex: 1;
-    border: none;
-    background: transparent;
+    border: 1px solid #d1d5db;
+    background: white;
     padding: 8px;
     font-size: 14px;
     outline: none;
     color: #374151;
+    border-radius: 4px;
 }
 
 .cell-input:focus {
     box-shadow: 0 0 0 1px #3b82f6;
-    border-radius: 4px;
+}
+
+.cell-textarea {
+    min-height: 38px;
+    resize: vertical;
 }
 
 /* Footer */
@@ -299,6 +320,11 @@ body {
     justify-content: space-between;
     padding: 16px;
     border-top: 1px solid #e5e7eb;
+}
+
+.footer-actions {
+    display: flex;
+    gap: 12px;
 }
 
 .pagination-controls {
@@ -430,6 +456,15 @@ body {
         gap: 12px;
     }
 
+    .footer-actions {
+        justify-content: stretch;
+    }
+
+    .footer-actions .btn {
+        flex: 1;
+        justify-content: center;
+    }
+
     .pagination-controls {
         justify-content: center;
     }
@@ -442,4 +477,5 @@ body {
     .select-input {
         width: 100%;
     }
+
 }
