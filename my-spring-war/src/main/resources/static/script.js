@@ -132,7 +132,7 @@ function getFilteredRows() {
     row.column1.toLowerCase().includes(q) ||
     row.column2.toLowerCase().includes(q) ||
     row.section.toLowerCase().includes(q) ||
-    row.englishReference.toLowerCase().includes(q)
+    (row.englishReference || '').toLowerCase().includes(q)
   );
 }
 
@@ -212,7 +212,7 @@ function renderTable() {
     tr.appendChild(valueTd);
 
     const sectionTd = document.createElement('td');
-    sectionTd.textContent = row.englishReference;
+    sectionTd.textContent = row.englishReference || '';
     tr.appendChild(sectionTd);
 
     const actionsTd = document.createElement('td');
@@ -342,7 +342,6 @@ function handleAddNewLabel() {
     section: 'custom',
     column1: '',
     column2: '',
-    englishReference: '',
     selected: true
   };
   rows.unshift(newRow);
