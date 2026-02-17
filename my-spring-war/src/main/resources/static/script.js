@@ -59,11 +59,6 @@ function renderSupportedLanguagesUnavailable() {
   targetLanguage = '';
 }
 
-function selectDefaultFile(files) {
-  const englishFile = (files || []).find((name) => String(name).toLowerCase() === 'en.json');
-  return englishFile || files[0] || "";
-}
-
 function renderSupportedLanguages(languages) {
   elements.targetLanguageSelect.innerHTML = '';
 
@@ -309,9 +304,9 @@ async function handleLoadFiles() {
   });
 
   selectedFile = files[0] || "";
-  const defaultFile = selectDefaultFile(files);
-  if (defaultFile) {
-    selectedFile = defaultFile;
+  const englishFile = files.find((name) => String(name).toLowerCase() === 'en.json');
+  if (englishFile) {
+    selectedFile = englishFile;
     elements.fileSelect.value = selectedFile;
   }
 
