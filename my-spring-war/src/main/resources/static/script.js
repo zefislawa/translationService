@@ -174,10 +174,25 @@ function renderTable() {
     tr.appendChild(checkboxTd);
 
     const keyTd = document.createElement('td');
-    const keyText = document.createElement('div');
-    keyText.className = 'cell-content';
-    keyText.textContent = row.column1;
-    keyTd.appendChild(keyText);
+    const isNewCustomRow = row.section === 'custom';
+
+    if (isNewCustomRow) {
+      const keyInput = document.createElement('input');
+      keyInput.type = 'text';
+      keyInput.className = 'cell-input';
+      keyInput.placeholder = 'Enter key';
+      keyInput.value = row.column1;
+      keyInput.addEventListener('input', (e) => {
+        row.column1 = e.target.value;
+      });
+      keyTd.appendChild(keyInput);
+    } else {
+      const keyText = document.createElement('div');
+      keyText.className = 'cell-content';
+      keyText.textContent = row.column1;
+      keyTd.appendChild(keyText);
+    }
+
     tr.appendChild(keyTd);
 
     const valueTd = document.createElement('td');
