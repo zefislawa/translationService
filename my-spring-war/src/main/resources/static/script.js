@@ -280,6 +280,8 @@ function showSuccessMessage(message) {
 }
 
 async function handleLoadFiles() {
+  const previouslySelectedFile = elements.fileSelect.value || selectedFile;
+
   try {
     const uiConfig = await fetchUiConfig();
     preferredTargetLanguage = (uiConfig.preferredTargetLanguage || '').trim();
@@ -299,7 +301,10 @@ async function handleLoadFiles() {
     elements.fileSelect.appendChild(option);
   });
 
-  selectedFile = files[0] || "";
+  const selectedFileStillExists = files.includes(previouslySelectedFile);
+  elements.fileSelect.value = selectedFileStillExists
+    ? previouslySelectedFile
+    : (files[0] || '');
 
   try {
     const supportedLanguages = await fetchSupportedLanguages();
@@ -325,6 +330,11 @@ function handleSearch() {
 }
 
 async function handleTranslate() {
+  if (elements.fileSelect.value !== selectedFile) {
+    alert('Selected file changed. Click Select to load the chosen file before translating.');
+    return;
+  }
+
   if (!selectedFile) {
     alert('Please choose and load a file first.');
     return;
@@ -368,6 +378,11 @@ function handleAddNewLabel() {
 
 async function handleSubmit(e) {
   e.preventDefault();
+
+  if (elements.fileSelect.value !== selectedFile) {
+    alert('Selected file changed. Click Select to load the chosen file before saving.');
+    return;
+  }
 
   if (!selectedFile) {
     alert('Please choose and load a file first.');
