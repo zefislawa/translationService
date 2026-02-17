@@ -170,6 +170,37 @@ public class TranslationService {
         return new TranslationExportResult(outputFile.toAbsolutePath().toString(), targetLanguage, translatedTexts.size());
     }
 
+    public Path saveRows(String customPath, String fileName, List<TranslationRow> rows) throws Exception {
+        if (rows == null || rows.isEmpty()) {
+            throw new IllegalArgumentException("No rows provided to save");
+        }
+
+        Map<String, Map<String, String>> payload = new LinkedHashMap<>();
+        for (TranslationRow row : rows) {
+            if (row == null) {
+                continue;
+            }
+
+            String section = row.getSection() == null ? "" : row.getSection().trim();
+            String key = row.getKey() == null ? "" : row.getKey().trim();
+
+            if (section.isEmpty()) {
+                throw new IllegalArgumentException("Each row must have a non-empty section");
+            }
+            if (key.isEmpty()) {
+                throw new IllegalArgumentException("Each row must have a non-empty key");
+            }
+
+            payload
+                    .computeIfAbsent(section, ignored -> new LinkedHashMap<>())
+                    .put(key, Objects.requireNonNullElse(row.getText(), ""));
+        }
+
+        Path outputFile = resolveJsonFile(customPath, fileName);
+        mapper.writerWithDefaultPrettyPrinter().writeValue(outputFile.toFile(), payload);
+        return outputFile;
+    }
+
     public List<SupportedLanguage> getSupportedLanguages() {
         requireGoogleApiKey();
         String url = UriComponentsBuilder

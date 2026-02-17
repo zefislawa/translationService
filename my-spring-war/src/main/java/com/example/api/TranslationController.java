@@ -3,11 +3,13 @@ package com.example.api;
 import com.example.api.dto.TranslationExportRequest;
 import com.example.api.dto.TranslationExportResult;
 import com.example.api.dto.TranslationFileLoadRequest;
+import com.example.api.dto.TranslationSaveRequest;
 import com.example.api.dto.SupportedLanguage;
 import com.example.api.dto.TranslationRow;
 import com.example.service.TranslationService;
 import org.springframework.web.bind.annotation.*;
 
+import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -49,5 +51,19 @@ public class TranslationController {
                 request.getTargetLanguage(),
                 request.getRows()
         );
+    }
+
+    @PostMapping("/save")
+    public Map<String, Object> saveRows(@RequestBody TranslationSaveRequest request) throws Exception {
+        Path savedFile = translationService.saveRows(
+                request.getPath(),
+                request.getFileName(),
+                request.getRows()
+        );
+
+        Map<String, Object> response = new LinkedHashMap<>();
+        response.put("file", savedFile.toAbsolutePath().toString());
+        response.put("rowCount", request.getRows() == null ? 0 : request.getRows().size());
+        return response;
     }
 }
