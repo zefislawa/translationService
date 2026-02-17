@@ -50,6 +50,15 @@ async function fetchSupportedLanguages() {
   return res.json();
 }
 
+function renderSupportedLanguagesUnavailable() {
+  elements.targetLanguageSelect.innerHTML = '';
+  const option = document.createElement('option');
+  option.value = '';
+  option.textContent = 'Google supported languages unavailable';
+  elements.targetLanguageSelect.appendChild(option);
+  targetLanguage = '';
+}
+
 function renderSupportedLanguages(languages) {
   elements.targetLanguageSelect.innerHTML = '';
 
@@ -271,11 +280,13 @@ function showSuccessMessage(message) {
 }
 
 async function handleLoadFiles() {
-  const uiConfig = await fetchUiConfig();
-  preferredTargetLanguage = (uiConfig.preferredTargetLanguage || '').trim();
-
-  const supportedLanguages = await fetchSupportedLanguages();
-  renderSupportedLanguages(supportedLanguages);
+  try {
+    const uiConfig = await fetchUiConfig();
+    preferredTargetLanguage = (uiConfig.preferredTargetLanguage || '').trim();
+  } catch (error) {
+    preferredTargetLanguage = '';
+    console.warn(error);
+  }
 
   const data = await fetchFiles();
   const files = data.files || [];
@@ -289,7 +300,16 @@ async function handleLoadFiles() {
   });
 
   selectedFile = files[0] || "";
-  showSuccessMessage(`Loaded ${files.length} files and ${supportedLanguages.length} supported languages.`);
+
+  try {
+    const supportedLanguages = await fetchSupportedLanguages();
+    renderSupportedLanguages(supportedLanguages);
+    showSuccessMessage(`Loaded ${files.length} files and ${supportedLanguages.length} Google supported languages.`);
+  } catch (error) {
+    console.warn(error);
+    renderSupportedLanguagesUnavailable();
+    showSuccessMessage(`Loaded ${files.length} files. Unable to load Google supported languages.`);
+  }
 }
 
 function handleRowsPerPageChange() {
