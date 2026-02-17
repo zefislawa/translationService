@@ -50,6 +50,20 @@ async function fetchSupportedLanguages() {
   return res.json();
 }
 
+function renderSupportedLanguagesUnavailable() {
+  elements.targetLanguageSelect.innerHTML = '';
+  const option = document.createElement('option');
+  option.value = '';
+  option.textContent = 'Google supported languages unavailable';
+  elements.targetLanguageSelect.appendChild(option);
+  targetLanguage = '';
+}
+
+function selectDefaultFile(files) {
+  const englishFile = (files || []).find((name) => String(name).toLowerCase() === 'en.json');
+  return englishFile || files[0] || "";
+}
+
 function renderSupportedLanguages(languages) {
   elements.targetLanguageSelect.innerHTML = '';
 
@@ -84,6 +98,7 @@ async function loadRows() {
   if (!res.ok) throw new Error(`Unable to load file (HTTP ${res.status})`);
 
   const apiRows = await res.json();
+  console.debug(`[translations] Loaded rows from ${selectedFile}: ${Array.isArray(apiRows) ? apiRows.length : 0}`);
   rows = (apiRows || []).map((r) => ({
     id: `${r.section}.${r.key}`,
     section: r.section || "",
@@ -271,14 +286,19 @@ function showSuccessMessage(message) {
 }
 
 async function handleLoadFiles() {
-  const uiConfig = await fetchUiConfig();
-  preferredTargetLanguage = (uiConfig.preferredTargetLanguage || '').trim();
-
-  const supportedLanguages = await fetchSupportedLanguages();
-  renderSupportedLanguages(supportedLanguages);
+  try {
+    const uiConfig = await fetchUiConfig();
+    preferredTargetLanguage = (uiConfig.preferredTargetLanguage || '').trim();
+  } catch (error) {
+    preferredTargetLanguage = '';
+    console.warn(error);
+  }
 
   const data = await fetchFiles();
   const files = data.files || [];
+  const resolvedPath = data.resolvedPath || '(unknown)';
+
+  console.debug('[translations] files response', data);
 
   elements.fileSelect.innerHTML = '';
   files.forEach((name) => {
@@ -288,8 +308,24 @@ async function handleLoadFiles() {
     elements.fileSelect.appendChild(option);
   });
 
-  selectedFile = files[0] || "";
-  showSuccessMessage(`Loaded ${files.length} files and ${supportedLanguages.length} supported languages.`);
+  selectedFile = selectDefaultFile(files);
+  if (selectedFile) {
+    elements.fileSelect.value = selectedFile;
+  }
+
+  if (!files.length) {
+    console.warn(`[translations] No JSON files found in ${resolvedPath}`);
+  }
+
+  try {
+    const supportedLanguages = await fetchSupportedLanguages();
+    renderSupportedLanguages(supportedLanguages);
+    showSuccessMessage(`Loaded ${files.length} files from ${resolvedPath} and ${supportedLanguages.length} Google supported languages.`);
+  } catch (error) {
+    console.warn(error);
+    renderSupportedLanguagesUnavailable();
+    showSuccessMessage(`Loaded ${files.length} files from ${resolvedPath}. Unable to load Google supported languages.`);
+  }
 }
 
 function handleRowsPerPageChange() {

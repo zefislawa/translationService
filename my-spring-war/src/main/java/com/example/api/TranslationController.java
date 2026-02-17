@@ -27,6 +27,7 @@ public class TranslationController {
         List<String> files = translationService.listJsonFiles(path);
         Map<String, Object> response = new LinkedHashMap<>();
         response.put("path", path);
+        response.put("resolvedPath", translationService.getDefaultDataDir());
         response.put("files", files);
         return response;
     }

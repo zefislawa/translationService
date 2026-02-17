@@ -14,6 +14,8 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.web.client.RestTemplate;
 import org.springframework.web.util.UriComponentsBuilder;
 
@@ -31,6 +33,8 @@ import java.util.stream.Stream;
 @Service
 public class TranslationService {
 
+    private static final Logger logger = LoggerFactory.getLogger(TranslationService.class);
+
     private final Path defaultDataDir;
     private final ObjectMapper mapper;
     private final RestTemplate restTemplate;
@@ -46,28 +50,32 @@ public class TranslationService {
             ObjectMapper mapper,
             RestTemplateBuilder restTemplateBuilder
     ) throws Exception {
-        this.defaultDataDir = Path.of(defaultDataDir).toAbsolutePath();
-        this.googleApiKey = googleApiKey;
-        this.googleProjectId = googleProjectId;
-        this.displayLanguageCode = displayLanguageCode;
+        this.defaultDataDir = Path.of(sanitizeProperty(defaultDataDir)).toAbsolutePath().normalize();
+        this.googleApiKey = sanitizeProperty(googleApiKey);
+        this.googleProjectId = sanitizeProperty(googleProjectId);
+        this.displayLanguageCode = sanitizeProperty(displayLanguageCode);
         this.mapper = mapper;
         this.restTemplate = restTemplateBuilder
                 .setConnectTimeout(Duration.ofSeconds(15))
                 .setReadTimeout(Duration.ofSeconds(60))
                 .build();
         Files.createDirectories(this.defaultDataDir);
+        logger.info("TranslationService configured with dataDir={}", this.defaultDataDir);
     }
 
     public List<String> listJsonFiles(String customPath) throws Exception {
         Path dir = resolveDataDir(customPath);
+        logger.info("Listing json files from directory={} (customPath={})", dir, customPath);
         try (Stream<Path> stream = Files.list(dir)) {
-            return stream
+            List<String> files = stream
                     .filter(Files::isRegularFile)
                     .map(Path::getFileName)
                     .map(Path::toString)
                     .filter(name -> name.toLowerCase().endsWith(".json"))
                     .sorted(Comparator.naturalOrder())
                     .toList();
+            logger.info("Found {} json files in {}", files.size(), dir);
+            return files;
         }
     }
 
@@ -231,9 +239,10 @@ public class TranslationService {
     }
 
     private Path resolveDataDir(String customPath) throws Exception {
-        Path dir = (customPath == null || customPath.isBlank())
+        String sanitizedCustomPath = sanitizeProperty(customPath);
+        Path dir = (sanitizedCustomPath == null || sanitizedCustomPath.isBlank())
                 ? defaultDataDir
-                : Path.of(customPath).toAbsolutePath().normalize();
+                : Path.of(sanitizedCustomPath).toAbsolutePath().normalize();
         Files.createDirectories(dir);
         return dir;
     }
@@ -258,6 +267,30 @@ public class TranslationService {
             throw new IllegalArgumentException("Cannot detect source language from file name: " + fileName);
         }
         return normalized;
+    }
+
+    public String getDefaultDataDir() {
+        return defaultDataDir.toString();
+    }
+
+    private String sanitizeProperty(String value) {
+        if (value == null) {
+            return null;
+        }
+
+        String sanitized = value.trim();
+
+        int literalNewlineIndex = sanitized.indexOf("\\n");
+        if (literalNewlineIndex >= 0) {
+            sanitized = sanitized.substring(0, literalNewlineIndex).trim();
+        }
+
+        int actualNewlineIndex = sanitized.indexOf('\n');
+        if (actualNewlineIndex >= 0) {
+            sanitized = sanitized.substring(0, actualNewlineIndex).trim();
+        }
+
+        return sanitized;
     }
 
     private record GoogleTranslateRequest(
