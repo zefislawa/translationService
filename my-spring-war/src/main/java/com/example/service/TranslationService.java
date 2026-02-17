@@ -72,7 +72,17 @@ public class TranslationService {
                     .map(Path::getFileName)
                     .map(Path::toString)
                     .filter(name -> name.toLowerCase().endsWith(".json"))
-                    .sorted(Comparator.naturalOrder())
+                    .sorted((a, b) -> {
+                        boolean aIsEnglish = "en.json".equalsIgnoreCase(a);
+                        boolean bIsEnglish = "en.json".equalsIgnoreCase(b);
+                        if (aIsEnglish && !bIsEnglish) {
+                            return -1;
+                        }
+                        if (!aIsEnglish && bIsEnglish) {
+                            return 1;
+                        }
+                        return a.compareToIgnoreCase(b);
+                    })
                     .toList();
             logger.info("Found {} json files in {}", files.size(), dir);
             return files;

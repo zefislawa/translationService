@@ -304,10 +304,6 @@ async function handleLoadFiles() {
   });
 
   selectedFile = files[0] || "";
-  const englishFile = files.find((name) => String(name).toLowerCase() === 'en.json');
-  if (englishFile) {
-    selectedFile = englishFile;
-  }
   if (selectedFile) {
     elements.fileSelect.value = selectedFile;
   }
