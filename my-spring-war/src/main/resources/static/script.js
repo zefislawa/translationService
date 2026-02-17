@@ -366,9 +366,36 @@ function handleAddNewLabel() {
 }
 
 
-function handleSubmit(e) {
+async function handleSubmit(e) {
   e.preventDefault();
-  showSuccessMessage('Edits are in memory. Click Translate to call Google and save translated JSON.');
+
+  if (!selectedFile) {
+    alert('Please choose and load a file first.');
+    return;
+  }
+
+  const payloadRows = rows.map((r) => ({
+    section: r.section,
+    key: r.column1,
+    text: r.column2
+  }));
+
+  const res = await fetch('/api/translations/save', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      fileName: selectedFile,
+      rows: payloadRows
+    })
+  });
+
+  if (!res.ok) {
+    const errorText = await res.text();
+    throw new Error(errorText || `Unable to save file (HTTP ${res.status})`);
+  }
+
+  await loadRows();
+  showSuccessMessage(`Saved ${payloadRows.length} rows to ${selectedFile}.`);
 }
 
 elements.loadFilesBtn.addEventListener('click', () => handleLoadFiles().catch((e) => alert(e.message)));
@@ -393,7 +420,7 @@ elements.targetLanguageSelect.addEventListener('change', () => {
   targetLanguage = elements.targetLanguageSelect.value;
 });
 elements.translateBtn.addEventListener('click', () => handleTranslate().catch((e) => alert(e.message)));
-elements.translationForm.addEventListener('submit', handleSubmit);
+elements.translationForm.addEventListener('submit', (e) => handleSubmit(e).catch((error) => alert(error.message)));
 elements.closeValueDialog.addEventListener('click', closeValueDialog);
 elements.cancelValueDialog.addEventListener('click', closeValueDialog);
 elements.saveValueDialog.addEventListener('click', saveValueDialog);
