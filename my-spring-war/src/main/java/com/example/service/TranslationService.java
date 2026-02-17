@@ -1,5 +1,7 @@
 package com.example.service;
 
+import com.example.api.dto.TranslationCompareDifference;
+import com.example.api.dto.TranslationCompareResult;
 import com.example.api.dto.TranslationExportResult;
 import com.example.api.dto.TranslationRow;
 import com.example.api.dto.SupportedLanguage;
@@ -25,6 +27,7 @@ import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.TreeSet;
 import java.util.Objects;
 import java.util.stream.Stream;
 
@@ -168,6 +171,57 @@ public class TranslationService {
         mapper.writerWithDefaultPrettyPrinter().writeValue(outputFile.toFile(), translatedPayload);
 
         return new TranslationExportResult(outputFile.toAbsolutePath().toString(), targetLanguage, translatedTexts.size());
+    }
+
+    public TranslationCompareResult compareFiles(String customPath, String fileName1, String fileName2) throws Exception {
+        Path file1 = resolveJsonFile(customPath, fileName1);
+        Path file2 = resolveJsonFile(customPath, fileName2);
+
+        Map<String, String> flattenedFile1 = flattenForCompare(readSectionMap(file1));
+        Map<String, String> flattenedFile2 = flattenForCompare(readSectionMap(file2));
+
+        TreeSet<String> allKeyPaths = new TreeSet<>();
+        allKeyPaths.addAll(flattenedFile1.keySet());
+        allKeyPaths.addAll(flattenedFile2.keySet());
+
+        List<TranslationCompareDifference> differences = new ArrayList<>();
+        for (String keyPath : allKeyPaths) {
+            String valueInFile1 = flattenedFile1.get(keyPath);
+            String valueInFile2 = flattenedFile2.get(keyPath);
+
+            if (Objects.equals(valueInFile1, valueInFile2)) {
+                continue;
+            }
+
+            String status;
+            if (valueInFile1 == null) {
+                status = "Missing in file 1";
+            } else if (valueInFile2 == null) {
+                status = "Missing in file 2";
+            } else {
+                status = "Different values";
+            }
+
+            differences.add(new TranslationCompareDifference(
+                    keyPath,
+                    Objects.requireNonNullElse(valueInFile1, ""),
+                    Objects.requireNonNullElse(valueInFile2, ""),
+                    status
+            ));
+        }
+
+        return new TranslationCompareResult(fileName1, fileName2, differences);
+    }
+
+    private Map<String, String> flattenForCompare(Map<String, Map<String, String>> sections) {
+        Map<String, String> flattened = new LinkedHashMap<>();
+        for (Map.Entry<String, Map<String, String>> sectionEntry : sections.entrySet()) {
+            String section = sectionEntry.getKey();
+            for (Map.Entry<String, String> keyEntry : sectionEntry.getValue().entrySet()) {
+                flattened.put(section + "." + keyEntry.getKey(), keyEntry.getValue());
+            }
+        }
+        return flattened;
     }
 
     public Path saveRows(String customPath, String fileName, List<TranslationRow> rows) throws Exception {

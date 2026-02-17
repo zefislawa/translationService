@@ -29,7 +29,10 @@ const elements = {
   valueDialogTextarea: document.getElementById('valueDialogTextarea'),
   closeValueDialog: document.getElementById('closeValueDialog'),
   cancelValueDialog: document.getElementById('cancelValueDialog'),
-  saveValueDialog: document.getElementById('saveValueDialog')
+  saveValueDialog: document.getElementById('saveValueDialog'),
+  compareFile1: document.getElementById('compareFile1'),
+  compareFile2: document.getElementById('compareFile2'),
+  compareBtn: document.getElementById('compareBtn')
 };
 
 async function fetchFiles() {
@@ -75,6 +78,78 @@ function renderSupportedLanguages(languages) {
   if (targetLanguage) {
     elements.targetLanguageSelect.value = targetLanguage;
   }
+}
+
+
+async function compareFiles(file1, file2) {
+  const res = await fetch('/api/translations/compare', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ fileName1: file1, fileName2: file2 })
+  });
+
+  if (!res.ok) throw new Error(`Unable to compare files (HTTP ${res.status})`);
+  return res.json();
+}
+
+function escapeHtml(value) {
+  return String(value || '')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
+}
+
+function showCompareResult(result) {
+  const newWindow = window.open('', '_blank');
+  if (!newWindow) {
+    alert('Unable to open compare window. Please allow pop-ups for this page.');
+    return;
+  }
+
+  const rowsHtml = (result.differences || []).map((item) => `
+    <tr>
+      <td>${escapeHtml(item.keyPath)}</td>
+      <td>${escapeHtml(item.valueInFile1)}</td>
+      <td>${escapeHtml(item.valueInFile2)}</td>
+      <td>${escapeHtml(item.status)}</td>
+    </tr>
+  `).join('');
+
+  newWindow.document.write(`
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+      <meta charset="UTF-8" />
+      <title>Compare result</title>
+      <style>
+        body { font-family: Arial, sans-serif; padding: 20px; color: #1f2937; }
+        h2 { margin-bottom: 4px; }
+        .meta { margin-bottom: 16px; color: #4b5563; }
+        table { border-collapse: collapse; width: 100%; }
+        th, td { border: 1px solid #d1d5db; padding: 8px; text-align: left; vertical-align: top; }
+        th { background: #f3f4f6; }
+      </style>
+    </head>
+    <body>
+      <h2>Compare result</h2>
+      <div class="meta">${escapeHtml(result.file1)} vs ${escapeHtml(result.file2)} (${(result.differences || []).length} difference(s))</div>
+      <table>
+        <thead>
+          <tr>
+            <th>Key path</th>
+            <th>File 1 value</th>
+            <th>File 2 value</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody>${rowsHtml || '<tr><td colspan="4">No differences found.</td></tr>'}</tbody>
+      </table>
+    </body>
+    </html>
+  `);
+  newWindow.document.close();
 }
 
 async function loadRows() {
@@ -321,6 +396,20 @@ async function handleLoadFiles() {
     ? previouslySelectedFile
     : (files[0] || '');
 
+  [elements.compareFile1, elements.compareFile2].forEach((select, index) => {
+    select.innerHTML = '';
+    files.forEach((name) => {
+      const option = document.createElement('option');
+      option.value = name;
+      option.textContent = name;
+      select.appendChild(option);
+    });
+
+    if (files.length > 1 && index === 1) {
+      select.value = files[1];
+    }
+  });
+
   try {
     const supportedLanguages = await fetchSupportedLanguages();
     renderSupportedLanguages(supportedLanguages);
@@ -330,6 +419,25 @@ async function handleLoadFiles() {
     renderSupportedLanguagesUnavailable();
     showSuccessMessage(`Loaded ${files.length} files. Unable to load Google supported languages.`);
   }
+}
+
+
+async function handleCompare() {
+  const file1 = elements.compareFile1.value;
+  const file2 = elements.compareFile2.value;
+
+  if (!file1 || !file2) {
+    alert('Please select both files to compare.');
+    return;
+  }
+
+  if (file1 === file2) {
+    alert('Please select two different files.');
+    return;
+  }
+
+  const result = await compareFiles(file1, file2);
+  showCompareResult(result);
 }
 
 function handleRowsPerPageChange() {
@@ -478,6 +586,7 @@ elements.targetLanguageSelect.addEventListener('change', () => {
   targetLanguage = elements.targetLanguageSelect.value;
 });
 elements.translateBtn.addEventListener('click', () => handleTranslate().catch((e) => alert(e.message)));
+elements.compareBtn.addEventListener('click', () => handleCompare().catch((e) => alert(e.message)));
 elements.translationForm.addEventListener('submit', (e) => handleSubmit(e).catch((error) => alert(error.message)));
 elements.closeValueDialog.addEventListener('click', closeValueDialog);
 elements.cancelValueDialog.addEventListener('click', closeValueDialog);
