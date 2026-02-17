@@ -366,6 +366,10 @@ body {
     gap: 12px;
 }
 
+.compare-controls .form-group {
+    min-width: 220px;
+}
+
 /* Dialog */
 .dialog-overlay {
     display: none;

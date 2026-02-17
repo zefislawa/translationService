@@ -1,5 +1,7 @@
 package com.example.api;
 
+import com.example.api.dto.TranslationCompareRequest;
+import com.example.api.dto.TranslationCompareResult;
 import com.example.api.dto.TranslationExportRequest;
 import com.example.api.dto.TranslationExportResult;
 import com.example.api.dto.TranslationFileLoadRequest;
@@ -50,6 +52,16 @@ public class TranslationController {
                 request.getFileName(),
                 request.getTargetLanguage(),
                 request.getRows()
+        );
+    }
+
+
+    @PostMapping("/compare")
+    public TranslationCompareResult compareFiles(@RequestBody TranslationCompareRequest request) throws Exception {
+        return translationService.compareFiles(
+                request.getPath(),
+                request.getFileName1(),
+                request.getFileName2()
         );
     }
 
