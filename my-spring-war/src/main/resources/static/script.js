@@ -303,13 +303,10 @@ async function handleLoadFiles() {
     elements.fileSelect.appendChild(option);
   });
 
-  selectedFile = files[0] || "";
-  const englishFile = files.find((name) => String(name).toLowerCase() === 'en.json');
-  if (englishFile) {
-    selectedFile = englishFile;
+  selectedFile = files.find((name) => String(name).toLowerCase() === 'en.json') || files[0] || "";
+  if (selectedFile) {
     elements.fileSelect.value = selectedFile;
   }
-
   if (!files.length) {
     console.warn(`[translations] No JSON files found in ${resolvedPath}`);
   }
