@@ -308,8 +308,10 @@ async function handleLoadFiles() {
     elements.fileSelect.appendChild(option);
   });
 
-  selectedFile = selectDefaultFile(files);
-  if (selectedFile) {
+  selectedFile = files[0] || "";
+  const defaultFile = selectDefaultFile(files);
+  if (defaultFile) {
+    selectedFile = defaultFile;
     elements.fileSelect.value = selectedFile;
   }
 
@@ -320,11 +322,11 @@ async function handleLoadFiles() {
   try {
     const supportedLanguages = await fetchSupportedLanguages();
     renderSupportedLanguages(supportedLanguages);
-    showSuccessMessage(`Loaded ${files.length} files from ${resolvedPath} and ${supportedLanguages.length} Google supported languages.`);
+    showSuccessMessage(`Loaded ${files.length} files and ${supportedLanguages.length} Google supported languages.`);
   } catch (error) {
     console.warn(error);
     renderSupportedLanguagesUnavailable();
-    showSuccessMessage(`Loaded ${files.length} files from ${resolvedPath}. Unable to load Google supported languages.`);
+    showSuccessMessage(`Loaded ${files.length} files. Unable to load Google supported languages.`);
   }
 }
 
