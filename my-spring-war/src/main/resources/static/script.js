@@ -180,7 +180,7 @@ function renderTable() {
       const keyInput = document.createElement('input');
       keyInput.type = 'text';
       keyInput.className = 'cell-input';
-      keyInput.placeholder = 'Enter key';
+      keyInput.placeholder = 'Enter key (example: b.newKey)';
       keyInput.value = row.column1;
       keyInput.addEventListener('input', (e) => {
         row.column1 = e.target.value;
@@ -383,11 +383,43 @@ function handleAddNewLabel() {
     column1: '',
     column2: '',
     reference: '',
+    isCustom: true,
     selected: true
   };
   rows.unshift(newRow);
   currentPage = 1;
   renderTable();
+}
+
+function normalizeRowsForSave() {
+  const preparedRows = rows.map((row) => {
+    const isCustomRow = row.isCustom === true || row.section === 'custom';
+    if (!isCustomRow) {
+      return {
+        section: row.section,
+        key: row.column1,
+        text: row.column2,
+        isCustom: false
+      };
+    }
+
+    const rawKey = (row.column1 || '').trim();
+    const keyMatch = /^([^.]+)\.(.+)$/.exec(rawKey);
+    if (!keyMatch) {
+      throw new Error('New label key must include a section prefix, for example: b.newKey');
+    }
+
+    return {
+      section: keyMatch[1].trim(),
+      key: keyMatch[2].trim(),
+      text: row.column2,
+      isCustom: true
+    };
+  });
+
+  const existingRows = preparedRows.filter((row) => !row.isCustom);
+  const customRows = preparedRows.filter((row) => row.isCustom);
+  return [...existingRows, ...customRows].map(({ section, key, text }) => ({ section, key, text }));
 }
 
 
@@ -404,11 +436,7 @@ async function handleSubmit(e) {
     return;
   }
 
-  const payloadRows = rows.map((r) => ({
-    section: r.section,
-    key: r.column1,
-    text: r.column2
-  }));
+  const payloadRows = normalizeRowsForSave();
 
   const res = await fetch('/api/translations/save', {
     method: 'POST',
