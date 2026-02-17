@@ -175,7 +175,7 @@ public class TranslationService {
             throw new IllegalArgumentException("No rows provided to save");
         }
 
-        Map<String, Map<String, String>> payload = new LinkedHashMap<>();
+        Map<String, Map<String, String>> incomingPayload = new LinkedHashMap<>();
         for (TranslationRow row : rows) {
             if (row == null) {
                 continue;
@@ -191,14 +191,52 @@ public class TranslationService {
                 throw new IllegalArgumentException("Each row must have a non-empty key");
             }
 
-            payload
+            incomingPayload
                     .computeIfAbsent(section, ignored -> new LinkedHashMap<>())
                     .put(key, Objects.requireNonNullElse(row.getText(), ""));
         }
 
         Path outputFile = resolveJsonFile(customPath, fileName);
+        Map<String, Map<String, String>> existingPayload = readSectionMap(outputFile);
+        Map<String, Map<String, String>> payload = mergeWithExistingOrder(existingPayload, incomingPayload);
         mapper.writerWithDefaultPrettyPrinter().writeValue(outputFile.toFile(), payload);
         return outputFile;
+    }
+
+    private Map<String, Map<String, String>> mergeWithExistingOrder(
+            Map<String, Map<String, String>> existingPayload,
+            Map<String, Map<String, String>> incomingPayload
+    ) {
+        Map<String, Map<String, String>> merged = new LinkedHashMap<>();
+
+        for (Map.Entry<String, Map<String, String>> existingSectionEntry : existingPayload.entrySet()) {
+            String section = existingSectionEntry.getKey();
+            if (!incomingPayload.containsKey(section)) {
+                continue;
+            }
+
+            Map<String, String> mergedSection = new LinkedHashMap<>();
+            Map<String, String> existingSectionValues = existingSectionEntry.getValue();
+            Map<String, String> incomingSectionValues = incomingPayload.get(section);
+
+            for (String existingKey : existingSectionValues.keySet()) {
+                if (incomingSectionValues.containsKey(existingKey)) {
+                    mergedSection.put(existingKey, incomingSectionValues.get(existingKey));
+                }
+            }
+
+            for (Map.Entry<String, String> incomingEntry : incomingSectionValues.entrySet()) {
+                mergedSection.putIfAbsent(incomingEntry.getKey(), incomingEntry.getValue());
+            }
+
+            merged.put(section, mergedSection);
+        }
+
+        for (Map.Entry<String, Map<String, String>> incomingSectionEntry : incomingPayload.entrySet()) {
+            merged.putIfAbsent(incomingSectionEntry.getKey(), new LinkedHashMap<>(incomingSectionEntry.getValue()));
+        }
+
+        return merged;
     }
 
     public List<SupportedLanguage> getSupportedLanguages() {
