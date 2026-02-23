@@ -32,7 +32,10 @@ const elements = {
   saveValueDialog: document.getElementById('saveValueDialog'),
   compareFile1: document.getElementById('compareFile1'),
   compareFile2: document.getElementById('compareFile2'),
-  compareBtn: document.getElementById('compareBtn')
+  compareBtn: document.getElementById('compareBtn'),
+  compareResultContainer: document.getElementById('compareResultContainer'),
+  compareSummary: document.getElementById('compareSummary'),
+  compareResultBody: document.getElementById('compareResultBody')
 };
 
 async function fetchFiles() {
@@ -92,64 +95,41 @@ async function compareFiles(file1, file2) {
   return res.json();
 }
 
-function escapeHtml(value) {
-  return String(value || '')
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;')
-    .replaceAll("'", '&#39;');
-}
 
 function showCompareResult(result) {
-  const newWindow = window.open('', '_blank');
-  if (!newWindow) {
-    alert('Unable to open compare window. Please allow pop-ups for this page.');
+  const differences = result.differences || [];
+
+  elements.compareResultContainer.classList.remove('hidden');
+  elements.compareSummary.textContent = `${result.file1} vs ${result.file2} (${differences.length} difference(s))`;
+
+  elements.compareResultBody.innerHTML = '';
+
+  if (differences.length === 0) {
+    elements.compareResultBody.innerHTML = '<tr><td colspan="4">No differences found.</td></tr>';
     return;
   }
 
-  const rowsHtml = (result.differences || []).map((item) => `
-    <tr>
-      <td>${escapeHtml(item.keyPath)}</td>
-      <td>${escapeHtml(item.valueInFile1)}</td>
-      <td>${escapeHtml(item.valueInFile2)}</td>
-      <td>${escapeHtml(item.status)}</td>
-    </tr>
-  `).join('');
+  differences.forEach((item) => {
+    const tr = document.createElement('tr');
 
-  newWindow.document.write(`
-    <!DOCTYPE html>
-    <html lang="en">
-    <head>
-      <meta charset="UTF-8" />
-      <title>Compare result</title>
-      <style>
-        body { font-family: Arial, sans-serif; padding: 20px; color: #1f2937; }
-        h2 { margin-bottom: 4px; }
-        .meta { margin-bottom: 16px; color: #4b5563; }
-        table { border-collapse: collapse; width: 100%; }
-        th, td { border: 1px solid #d1d5db; padding: 8px; text-align: left; vertical-align: top; }
-        th { background: #f3f4f6; }
-      </style>
-    </head>
-    <body>
-      <h2>Compare result</h2>
-      <div class="meta">${escapeHtml(result.file1)} vs ${escapeHtml(result.file2)} (${(result.differences || []).length} difference(s))</div>
-      <table>
-        <thead>
-          <tr>
-            <th>Key path</th>
-            <th>File 1 value</th>
-            <th>File 2 value</th>
-            <th>Status</th>
-          </tr>
-        </thead>
-        <tbody>${rowsHtml || '<tr><td colspan="4">No differences found.</td></tr>'}</tbody>
-      </table>
-    </body>
-    </html>
-  `);
-  newWindow.document.close();
+    const keyPathTd = document.createElement('td');
+    keyPathTd.textContent = item.keyPath || '';
+    tr.appendChild(keyPathTd);
+
+    const file1Td = document.createElement('td');
+    file1Td.textContent = item.valueInFile1 || '';
+    tr.appendChild(file1Td);
+
+    const file2Td = document.createElement('td');
+    file2Td.textContent = item.valueInFile2 || '';
+    tr.appendChild(file2Td);
+
+    const statusTd = document.createElement('td');
+    statusTd.textContent = item.status || '';
+    tr.appendChild(statusTd);
+
+    elements.compareResultBody.appendChild(tr);
+  });
 }
 
 async function loadRows() {
