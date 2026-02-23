@@ -12,13 +12,21 @@ import java.util.Map;
 public class AppConfigController {
 
     private final String preferredTargetLanguage;
+    private final String displayLanguageCode;
 
-    public AppConfigController(@Value("${myapp.ui.preferredTargetLanguage:}") String preferredTargetLanguage) {
+    public AppConfigController(
+            @Value("${myapp.ui.preferredTargetLanguage:}") String preferredTargetLanguage,
+            @Value("${myapp.google.displayLanguageCode:}") String displayLanguageCode
+    ) {
         this.preferredTargetLanguage = preferredTargetLanguage;
+        this.displayLanguageCode = displayLanguageCode;
     }
 
     @GetMapping
     public Map<String, String> getConfig() {
-        return Map.of("preferredTargetLanguage", preferredTargetLanguage);
+        return Map.of(
+                "preferredTargetLanguage", preferredTargetLanguage,
+                "displayLanguageCode", displayLanguageCode
+        );
     }
 }

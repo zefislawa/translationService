@@ -6,6 +6,7 @@ let rowsPerPage = 10;
 let currentPage = 1;
 let editingRow = null;
 let preferredTargetLanguage = "";
+let preferredDisplayLanguage = "";
 
 const elements = {
   successMessage: document.getElementById('successMessage'),
@@ -355,8 +356,10 @@ async function handleLoadFiles() {
   try {
     const uiConfig = await fetchUiConfig();
     preferredTargetLanguage = (uiConfig.preferredTargetLanguage || '').trim();
+    preferredDisplayLanguage = (uiConfig.displayLanguageCode || '').trim();
   } catch (error) {
     preferredTargetLanguage = '';
+    preferredDisplayLanguage = '';
     console.warn(error);
   }
 
@@ -371,10 +374,17 @@ async function handleLoadFiles() {
     elements.fileSelect.appendChild(option);
   });
 
+  const normalizedPreferredDisplayLanguage = preferredDisplayLanguage.toLowerCase();
+  const directLanguageFileMatch = files.find((fileName) =>
+    fileName.toLowerCase() === `${normalizedPreferredDisplayLanguage}.json`
+  );
+  const fallbackLanguageFileMatch = normalizedPreferredDisplayLanguage.includes('-')
+    ? files.find((fileName) => fileName.toLowerCase() === `${normalizedPreferredDisplayLanguage.split('-')[0]}.json`)
+    : '';
   const selectedFileStillExists = files.includes(previouslySelectedFile);
   elements.fileSelect.value = selectedFileStillExists
     ? previouslySelectedFile
-    : (files[0] || '');
+    : (directLanguageFileMatch || fallbackLanguageFileMatch || files[0] || '');
 
   [elements.compareFile1, elements.compareFile2].forEach((select, index) => {
     select.innerHTML = '';
