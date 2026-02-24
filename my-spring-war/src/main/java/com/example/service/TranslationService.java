@@ -1,5 +1,6 @@
 package com.example.service;
 
+import com.example.config.OutboundApiLoggingInterceptor;
 import com.example.api.dto.TranslationCompareDifference;
 import com.example.api.dto.TranslationCompareResult;
 import com.example.api.dto.TranslationExportResult;
@@ -15,6 +16,8 @@ import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.client.BufferingClientHttpRequestFactory;
+import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 import org.springframework.web.util.UriComponentsBuilder;
@@ -57,6 +60,8 @@ public class TranslationService {
         this.restTemplate = restTemplateBuilder
                 .setConnectTimeout(Duration.ofSeconds(15))
                 .setReadTimeout(Duration.ofSeconds(60))
+                .requestFactory(() -> new BufferingClientHttpRequestFactory(new SimpleClientHttpRequestFactory()))
+                .additionalInterceptors(new OutboundApiLoggingInterceptor(mapper))
                 .build();
         Files.createDirectories(this.defaultDataDir);
     }
