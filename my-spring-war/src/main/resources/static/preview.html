@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cerillion Theme Preview</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div class="container">
+    <div class="form-card">
+        <div class="section-card form-header">
+            <h2 class="section-heading">Translation management – Cerillion style preview</h2>
+            <div class="form-group">
+                <label class="form-label">Choose a file</label>
+                <div class="input-row">
+                    <select class="select-input"><option>en.json</option></select>
+                    <button type="button" class="btn btn-outline">Load files</button>
+                    <button type="button" class="btn btn-primary">Select</button>
+                </div>
+            </div>
+            <div class="search-container">
+                <svg class="icon search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="11" cy="11" r="8"></circle>
+                    <path d="m21 21-4.35-4.35"></path>
+                </svg>
+                <input type="text" class="search-input" value="Accept" aria-label="Search preview">
+            </div>
+            <div class="table-container">
+                <table class="data-table">
+                    <thead>
+                    <tr>
+                        <th class="col-checkbox">✓</th>
+                        <th class="col-key">Key (JSON ID)</th>
+                        <th class="col-text">Value (Editable)</th>
+                        <th class="col-source">Reference</th>
+                        <th class="col-actions">Actions</th>
+                    </tr>
+                    </thead>
+                    <tbody>
+                    <tr>
+                        <td>✓</td>
+                        <td><div class="cell-content">Accept</div></td>
+                        <td><textarea class="cell-input cell-textarea">Yes, I accept.</textarea></td>
+                        <td class="reference-cell">Yes, I accept.</td>
+                        <td><button type="button" class="btn btn-outline btn-sm">Delete</button></td>
+                    </tr>
+                    </tbody>
+                </table>
+            </div>
+            <div class="form-footer">
+                <div class="pagination-controls"><span class="page-info">Page 1 of 1</span></div>
+                <div class="footer-actions">
+                    <button type="button" class="btn btn-outline">New label</button>
+                    <button type="button" class="btn btn-primary">Save current rows</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="translation-section section-card">
+            <h3 class="section-title">Translate your texts</h3>
+            <div class="translation-controls">
+                <select class="select-input"><option>Bulgarian (bg)</option></select>
+                <button class="btn btn-primary" type="button">Translate</button>
+            </div>
+        </div>
+
+        <div class="translation-section section-card">
+            <h3 class="section-title">Compare files</h3>
+            <div class="translation-controls compare-controls">
+                <select class="select-input"><option>hy.json</option></select>
+                <select class="select-input"><option>bg.json</option></select>
+                <select class="select-input"><option>Different values</option></select>
+                <button class="btn btn-primary" type="button">Compare</button>
+            </div>
+        </div>
+    </div>
+</div>
+</body>
+</html>

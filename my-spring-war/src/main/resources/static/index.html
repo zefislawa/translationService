@@ -17,69 +17,72 @@
                 <span id="successMessageText">Translation was successful</span>
             </div>
 
-            <div class="form-header">
-                <div class="form-group">
-                    <label class="form-label">Choose a file</label>
-                    <div class="input-row">
-                        <select id="fileSelect" class="select-input"></select>
-                        <button type="button" class="btn btn-outline" id="loadFilesBtn">Load files</button>
-                        <button type="button" class="btn btn-primary" id="selectFileBtn">Select</button>
+            <div class="section-card">
+                <div class="form-header">
+                    <h2 class="section-heading">File and search</h2>
+                    <div class="form-group">
+                        <label class="form-label">Choose a file</label>
+                        <div class="input-row">
+                            <select id="fileSelect" class="select-input"></select>
+                            <button type="button" class="btn btn-outline" id="loadFilesBtn">Load files</button>
+                            <button type="button" class="btn btn-primary" id="selectFileBtn">Select</button>
+                        </div>
                     </div>
-                </div>
 
-                <div class="form-group">
-                    <div class="search-container">
-                        <svg class="icon search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <circle cx="11" cy="11" r="8"></circle>
-                            <path d="m21 21-4.35-4.35"></path>
-                        </svg>
-                        <input type="text" id="searchInput" class="search-input" placeholder="Search in Key, Value, and Reference...">
+                    <div class="form-group">
+                        <div class="search-container">
+                            <svg class="icon search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <circle cx="11" cy="11" r="8"></circle>
+                                <path d="m21 21-4.35-4.35"></path>
+                            </svg>
+                            <input type="text" id="searchInput" class="search-input" placeholder="Search in Key, Value, and Reference...">
+                        </div>
                     </div>
-                </div>
 
-                <div class="form-group">
-                    <div class="input-row">
-                        <label class="form-label">Rows per page:</label>
-                        <select id="rowsPerPage" class="select-input-small">
-                            <option value="10">10</option>
-                            <option value="20">20</option>
-                            <option value="40">40</option>
-                            <option value="50">50</option>
-                        </select>
+                    <div class="form-group">
+                        <div class="input-row">
+                            <label class="form-label">Rows per page:</label>
+                            <select id="rowsPerPage" class="select-input-small">
+                                <option value="10">10</option>
+                                <option value="20">20</option>
+                                <option value="40">40</option>
+                                <option value="50">50</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="table-container">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th class="col-checkbox">
+                                        <input type="checkbox" id="selectAllRows" class="checkbox" aria-label="Select all rows">
+                                    </th>
+                                    <th class="col-key">Key (JSON ID)</th>
+                                    <th class="col-text">Value (Editable)</th>
+                                    <th class="col-source">Reference</th>
+                                    <th class="col-actions">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="tableBody"></tbody>
+                        </table>
+                    </div>
+
+                    <div class="form-footer">
+                        <div class="pagination-controls">
+                            <button type="button" class="btn btn-outline btn-sm" id="prevBtn">Previous</button>
+                            <span class="page-info" id="pageInfo">Page 1 of 1</span>
+                            <button type="button" class="btn btn-outline btn-sm" id="nextBtn">Next</button>
+                        </div>
+                        <div class="footer-actions">
+                            <button type="button" class="btn btn-outline" id="newLabelBtn">New label</button>
+                            <button type="submit" class="btn btn-primary">Save current rows</button>
+                        </div>
                     </div>
                 </div>
             </div>
 
-            <div class="table-container">
-                <table class="data-table">
-                    <thead>
-                        <tr>
-                            <th class="col-checkbox">
-                                <input type="checkbox" id="selectAllRows" class="checkbox" aria-label="Select all rows">
-                            </th>
-                            <th class="col-key">Key (JSON ID)</th>
-                            <th class="col-text">Value (Editable)</th>
-                            <th class="col-source">Reference</th>
-                            <th class="col-actions">Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody id="tableBody"></tbody>
-                </table>
-            </div>
-
-            <div class="form-footer">
-                <div class="pagination-controls">
-                    <button type="button" class="btn btn-outline btn-sm" id="prevBtn">Previous</button>
-                    <span class="page-info" id="pageInfo">Page 1 of 1</span>
-                    <button type="button" class="btn btn-outline btn-sm" id="nextBtn">Next</button>
-                </div>
-                <div class="footer-actions">
-                    <button type="button" class="btn btn-outline" id="newLabelBtn">New label</button>
-                    <button type="submit" class="btn btn-primary">Save current rows</button>
-                </div>
-            </div>
-
-            <div class="translation-section">
+            <div class="translation-section section-card">
                 <h3 class="section-title">Translate your texts</h3>
                 <div class="translation-controls">
                     <div class="form-group">
@@ -95,7 +98,7 @@
                 </div>
             </div>
 
-            <div class="translation-section">
+            <div class="translation-section section-card">
                 <h3 class="section-title">Compare files</h3>
                 <div class="translation-controls compare-controls">
                     <div class="form-group">
