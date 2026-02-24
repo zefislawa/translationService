@@ -18,6 +18,7 @@ import org.springframework.web.util.ContentCachingResponseWrapper;
 import java.io.IOException;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -78,7 +79,7 @@ public class ApiTrafficLoggingFilter extends OncePerRequestFilter {
 
     private Map<String, List<String>> extractResponseHeaders(ContentCachingResponseWrapper response) {
         Map<String, List<String>> headers = new LinkedHashMap<>();
-        response.getHeaderNames().forEach(name -> headers.put(name, response.getHeaders(name)));
+        response.getHeaderNames().forEach(name -> headers.put(name, new ArrayList<>(response.getHeaders(name))));
         return headers;
     }
 
