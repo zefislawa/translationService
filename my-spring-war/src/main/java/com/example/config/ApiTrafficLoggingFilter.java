@@ -19,7 +19,6 @@ import java.io.IOException;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.util.Collections;
-import java.util.Enumeration;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -72,13 +71,7 @@ public class ApiTrafficLoggingFilter extends OncePerRequestFilter {
 
     private Map<String, List<String>> extractRequestHeaders(HttpServletRequest request) {
         Map<String, List<String>> headers = new LinkedHashMap<>();
-        Enumeration<String> headerNames = request.getHeaderNames();
-        if (headerNames == null) {
-            return headers;
-        }
-
-        while (headerNames.hasMoreElements()) {
-            String headerName = headerNames.nextElement();
+        for (String headerName : Collections.list(request.getHeaderNames())) {
             headers.put(headerName, Collections.list(request.getHeaders(headerName)));
         }
         return headers;
