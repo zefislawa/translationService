@@ -22,6 +22,7 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 @Component
 @Order(Ordered.HIGHEST_PRECEDENCE)
@@ -70,19 +71,23 @@ public class ApiTrafficLoggingFilter extends OncePerRequestFilter {
     }
 
     private Map<String, List<String>> extractRequestHeaders(HttpServletRequest request) {
-        Map<String, List<String>> headers = new LinkedHashMap<>();
-        for (String headerName : Collections.list(request.getHeaderNames())) {
-            headers.put(headerName, Collections.list(request.getHeaders(headerName)));
-        }
-        return headers;
+        return Collections.list(request.getHeaderNames()).stream()
+                .collect(Collectors.toMap(
+                        headerName -> headerName,
+                        headerName -> Collections.list(request.getHeaders(headerName)),
+                        (left, right) -> right,
+                        LinkedHashMap::new
+                ));
     }
 
     private Map<String, List<String>> extractResponseHeaders(ContentCachingResponseWrapper response) {
-        Map<String, List<String>> headers = new LinkedHashMap<>();
-        for (String headerName : response.getHeaderNames()) {
-            headers.put(headerName, response.getHeaders(headerName));
-        }
-        return headers;
+        return response.getHeaderNames().stream()
+                .collect(Collectors.toMap(
+                        headerName -> headerName,
+                        response::getHeaders,
+                        (left, right) -> right,
+                        LinkedHashMap::new
+                ));
     }
 
     private String extractBody(byte[] body, String encoding, String contentType) {
