@@ -323,6 +323,11 @@ body {
     color: #374151;
 }
 
+.key-cell-input {
+    min-width: 280px;
+    width: 100%;
+}
+
 .cell-textarea {
     min-height: 38px;
     resize: vertical;

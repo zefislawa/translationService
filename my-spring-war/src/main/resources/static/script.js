@@ -276,7 +276,7 @@ function renderTable() {
     if (isNewCustomRow) {
       const keyInput = document.createElement('input');
       keyInput.type = 'text';
-      keyInput.className = 'cell-input';
+      keyInput.className = 'cell-input key-cell-input';
       keyInput.placeholder = 'Enter key (example: b.newKey)';
       keyInput.value = row.column1;
       keyInput.addEventListener('input', (e) => {
