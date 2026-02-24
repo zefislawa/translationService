@@ -7,6 +7,8 @@ let currentPage = 1;
 let editingRow = null;
 let preferredTargetLanguage = "";
 let preferredDisplayLanguage = "";
+let compareDifferences = [];
+let compareStatusFilter = 'ALL';
 
 const elements = {
   successMessage: document.getElementById('successMessage'),
@@ -33,6 +35,7 @@ const elements = {
   saveValueDialog: document.getElementById('saveValueDialog'),
   compareFile1: document.getElementById('compareFile1'),
   compareFile2: document.getElementById('compareFile2'),
+  compareStatusFilter: document.getElementById('compareStatusFilter'),
   compareBtn: document.getElementById('compareBtn'),
   compareResultContainer: document.getElementById('compareResultContainer'),
   compareSummary: document.getElementById('compareSummary'),
@@ -97,11 +100,42 @@ async function compareFiles(file1, file2) {
 }
 
 
-function showCompareResult(result) {
-  const differences = result.differences || [];
+function getFilteredCompareDifferences() {
+  if (compareStatusFilter === 'ALL') {
+    return compareDifferences;
+  }
+
+  return compareDifferences.filter((item) => (item.status || '') === compareStatusFilter);
+}
+
+function renderCompareStatusFilterOptions() {
+  const statuses = [...new Set(compareDifferences.map((item) => item.status).filter(Boolean))].sort();
+  const options = ['ALL', ...statuses];
+
+  elements.compareStatusFilter.innerHTML = '';
+  options.forEach((status) => {
+    const option = document.createElement('option');
+    option.value = status;
+    option.textContent = status === 'ALL' ? 'All statuses' : status;
+    elements.compareStatusFilter.appendChild(option);
+  });
+
+  if (!options.includes(compareStatusFilter)) {
+    compareStatusFilter = 'ALL';
+  }
+
+  elements.compareStatusFilter.value = compareStatusFilter;
+}
+
+function renderCompareResult() {
+  const differences = getFilteredCompareDifferences();
+  const totalDifferences = compareDifferences.length;
+  const filteredSuffix = compareStatusFilter === 'ALL'
+    ? `${totalDifferences} difference(s)`
+    : `${differences.length} of ${totalDifferences} difference(s)`;
 
   elements.compareResultContainer.classList.remove('hidden');
-  elements.compareSummary.textContent = `${result.file1} vs ${result.file2} (${differences.length} difference(s))`;
+  elements.compareSummary.textContent = `${elements.compareFile1.value} vs ${elements.compareFile2.value} (${filteredSuffix})`;
 
   elements.compareResultBody.innerHTML = '';
 
@@ -131,6 +165,13 @@ function showCompareResult(result) {
 
     elements.compareResultBody.appendChild(tr);
   });
+}
+
+function showCompareResult(result) {
+  compareDifferences = result.differences || [];
+  compareStatusFilter = 'ALL';
+  renderCompareStatusFilterOptions();
+  renderCompareResult();
 }
 
 async function loadRows() {
@@ -577,6 +618,10 @@ elements.targetLanguageSelect.addEventListener('change', () => {
 });
 elements.translateBtn.addEventListener('click', () => handleTranslate().catch((e) => alert(e.message)));
 elements.compareBtn.addEventListener('click', () => handleCompare().catch((e) => alert(e.message)));
+elements.compareStatusFilter.addEventListener('change', () => {
+  compareStatusFilter = elements.compareStatusFilter.value;
+  renderCompareResult();
+});
 elements.translationForm.addEventListener('submit', (e) => handleSubmit(e).catch((error) => alert(error.message)));
 elements.closeValueDialog.addEventListener('click', closeValueDialog);
 elements.cancelValueDialog.addEventListener('click', closeValueDialog);
