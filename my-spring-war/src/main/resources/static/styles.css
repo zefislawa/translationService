@@ -426,11 +426,15 @@ body {
 }
 
 .compare-table .compare-col-key {
-    width: 20%;
+    width: 14%;
 }
 
 .compare-table .compare-col-value {
-    width: 32%;
+    width: 34%;
+}
+
+.compare-table .compare-col-status {
+    width: 14%;
 }
 
 .dialog-overlay {

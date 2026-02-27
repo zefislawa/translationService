@@ -157,7 +157,7 @@ function renderCompareResult() {
     : `${differences.length} of ${totalDifferences} difference(s)`;
 
   elements.compareResultContainer.classList.remove('hidden');
-  elements.compareTranslateImportBtn.disabled = compareStatusFilter !== 'Missing in file 1' || differences.length === 0;
+  elements.compareTranslateImportBtn.disabled = !['Missing in file 1', 'Missing in file 2'].includes(compareStatusFilter) || differences.length === 0;
   elements.compareSummary.textContent = `${elements.compareFile1.value} vs ${elements.compareFile2.value} (${filteredSuffix})`;
 
   elements.compareResultBody.innerHTML = '';
@@ -236,8 +236,9 @@ function splitKeyPath(keyPath) {
 }
 
 async function handleCompareTranslateImport() {
-  if (compareStatusFilter !== 'Missing in file 1') {
-    alert('Translate and Import is available when status filter is Missing in file 1.');
+  const supportedStatuses = ['Missing in file 1', 'Missing in file 2'];
+  if (!supportedStatuses.includes(compareStatusFilter)) {
+    alert('Translate and Import is available when status filter is Missing in file 1 or Missing in file 2.');
     return;
   }
 
@@ -247,21 +248,27 @@ async function handleCompareTranslateImport() {
     return;
   }
 
+  const sourceValueField = compareStatusFilter === 'Missing in file 1' ? 'valueInFile2' : 'valueInFile1';
+  const sourceFileName = compareStatusFilter === 'Missing in file 1'
+    ? elements.compareFile2.value
+    : elements.compareFile1.value;
+  const targetFileName = compareStatusFilter === 'Missing in file 1'
+    ? elements.compareFile1.value
+    : elements.compareFile2.value;
+
   const rowsToTranslate = selectedDifferences.map((item) => {
     const { section, key } = splitKeyPath(item.keyPath || '');
     return {
       section,
       key,
-      text: item.valueInFile2 || ''
+      text: item[sourceValueField] || ''
     };
   });
 
-  const sourceFileName = elements.compareFile2.value;
-  const targetFileName = elements.compareFile1.value;
   const result = await translateAndImportCompareRows(sourceFileName, targetFileName, rowsToTranslate);
   showSuccessMessage(`Translated and imported ${Number(result.textCount || 0)} row(s) into ${result.outputFileName}.`);
 
-  const compareResult = await compareFiles(targetFileName, sourceFileName);
+  const compareResult = await compareFiles(elements.compareFile1.value, elements.compareFile2.value);
   showCompareResult(compareResult);
 }
 
