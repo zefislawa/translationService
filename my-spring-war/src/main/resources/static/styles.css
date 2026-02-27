@@ -403,12 +403,34 @@ body {
 .compare-actions-row {
     display: flex;
     justify-content: flex-end;
+    align-items: center;
+    gap: 8px;
     margin-bottom: 10px;
 }
 
 .compare-table td,
 .compare-table th {
     font-size: 13px;
+}
+
+.compare-info-icon {
+    width: 28px;
+    height: 28px;
+    border-radius: 999px;
+    font-size: 14px;
+    font-weight: 700;
+    font-family: Georgia, serif;
+    color: var(--c-primary);
+    border-color: #bfdbfe;
+    background-color: #eff6ff;
+}
+
+.compare-table .compare-col-key {
+    width: 20%;
+}
+
+.compare-table .compare-col-value {
+    width: 32%;
 }
 
 .dialog-overlay {
