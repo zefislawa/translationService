@@ -122,10 +122,16 @@
                 </div>
                 <div id="compareResultContainer" class="compare-result hidden" aria-live="polite">
                     <p id="compareSummary" class="compare-summary"></p>
+                    <div class="compare-actions-row">
+                        <button type="button" class="btn btn-primary" id="compareTranslateImportBtn">Translate and Import</button>
+                    </div>
                     <div class="table-container">
                         <table class="data-table compare-table">
                             <thead>
                             <tr>
+                                <th class="col-checkbox">
+                                    <input type="checkbox" id="selectAllCompareRows" class="checkbox" aria-label="Select all compare rows">
+                                </th>
                                 <th>Key path</th>
                                 <th>File A value</th>
                                 <th>File B value</th>

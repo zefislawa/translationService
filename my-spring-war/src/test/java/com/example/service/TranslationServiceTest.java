@@ -102,4 +102,41 @@ class TranslationServiceTest {
         assertEquals("Missing in file 2", result.differences().get(2).status());
     }
 
+    @Test
+    void translateAndImportMergesRowsIntoTargetFileWhenLanguagesMatch() throws Exception {
+        TranslationService service = new TranslationService(
+                tempDir.toString(),
+                "dummy-api-key",
+                "dummy-project-id",
+                "en",
+                new ObjectMapper(),
+                new RestTemplateBuilder()
+        );
+
+        Path targetFile = tempDir.resolve("de.json");
+        Files.writeString(targetFile, """
+                {
+                  "b" : {
+                    "existing" : "hallo"
+                  }
+                }
+                """);
+
+        List<TranslationRow> rows = List.of(
+                new TranslationRow("b", "newKey", "neuer Wert", ""),
+                new TranslationRow("b", "existing", "aktualisiert", "")
+        );
+
+        service.translateAndImport(null, "de.json", "de.json", rows);
+
+        String actual = Files.readString(targetFile);
+        assertEquals("""
+                {
+                  "b" : {
+                    "existing" : "aktualisiert",
+                    "newKey" : "neuer Wert"
+                  }
+                }""", actual);
+    }
+
 }
