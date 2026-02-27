@@ -178,6 +178,48 @@ public class TranslationService {
         return new TranslationExportResult(outputFile.toAbsolutePath().toString(), targetLanguage, translatedTexts.size());
     }
 
+    public TranslationExportResult translateAndImport(
+            String customPath,
+            String sourceFileName,
+            String targetFileName,
+            List<TranslationRow> rows
+    ) throws Exception {
+        if (rows == null || rows.isEmpty()) {
+            throw new IllegalArgumentException("No rows provided for translation");
+        }
+
+        String sourceLanguage = extractLanguageFromFileName(sourceFileName);
+        String targetLanguage = extractLanguageFromFileName(targetFileName);
+        List<String> contents = rows.stream().map(TranslationRow::getText).toList();
+        List<String> translatedTexts = sourceLanguage.equalsIgnoreCase(targetLanguage)
+                ? contents
+                : callGoogleTranslate(sourceLanguage, targetLanguage, contents);
+
+        if (translatedTexts.size() != rows.size()) {
+            throw new IllegalStateException("Google Translate returned an unexpected number of translated strings");
+        }
+
+        Path outputFile = resolveJsonFile(customPath, targetFileName);
+        Map<String, Map<String, String>> existingPayload = readSectionMap(outputFile);
+
+        for (int i = 0; i < rows.size(); i++) {
+            TranslationRow row = rows.get(i);
+            String section = row.getSection() == null ? "" : row.getSection().trim();
+            String key = row.getKey() == null ? "" : row.getKey().trim();
+
+            if (section.isEmpty() || key.isEmpty()) {
+                throw new IllegalArgumentException("Each compare row must include a non-empty section and key");
+            }
+
+            existingPayload
+                    .computeIfAbsent(section, ignored -> new LinkedHashMap<>())
+                    .put(key, translatedTexts.get(i));
+        }
+
+        mapper.writerWithDefaultPrettyPrinter().writeValue(outputFile.toFile(), existingPayload);
+        return new TranslationExportResult(outputFile.getFileName().toString(), targetLanguage, translatedTexts.size());
+    }
+
     public TranslationCompareResult compareFiles(String customPath, String fileName1, String fileName2) throws Exception {
         Path file1 = resolveJsonFile(customPath, fileName1);
         Path file2 = resolveJsonFile(customPath, fileName2);

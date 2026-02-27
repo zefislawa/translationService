@@ -2,6 +2,7 @@ package com.example.api;
 
 import com.example.api.dto.TranslationCompareRequest;
 import com.example.api.dto.TranslationCompareResult;
+import com.example.api.dto.TranslationCompareTranslateImportRequest;
 import com.example.api.dto.TranslationExportRequest;
 import com.example.api.dto.TranslationExportResult;
 import com.example.api.dto.TranslationFileLoadRequest;
@@ -62,6 +63,16 @@ public class TranslationController {
                 request.getPath(),
                 request.getFileName1(),
                 request.getFileName2()
+        );
+    }
+
+    @PostMapping("/compare/translate-import")
+    public TranslationExportResult translateImportCompareRows(@RequestBody TranslationCompareTranslateImportRequest request) throws Exception {
+        return translationService.translateAndImport(
+                request.getPath(),
+                request.getSourceFileName(),
+                request.getTargetFileName(),
+                request.getRows()
         );
     }
 

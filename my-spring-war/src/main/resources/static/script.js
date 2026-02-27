@@ -9,6 +9,7 @@ let preferredTargetLanguage = "";
 let preferredDisplayLanguage = "";
 let compareDifferences = [];
 let compareStatusFilter = 'ALL';
+let compareSelectedKeys = new Set();
 
 const elements = {
   successMessage: document.getElementById('successMessage'),
@@ -37,9 +38,11 @@ const elements = {
   compareFile2: document.getElementById('compareFile2'),
   compareStatusFilter: document.getElementById('compareStatusFilter'),
   compareBtn: document.getElementById('compareBtn'),
+  compareTranslateImportBtn: document.getElementById('compareTranslateImportBtn'),
   compareResultContainer: document.getElementById('compareResultContainer'),
   compareSummary: document.getElementById('compareSummary'),
-  compareResultBody: document.getElementById('compareResultBody')
+  compareResultBody: document.getElementById('compareResultBody'),
+  selectAllCompareRows: document.getElementById('selectAllCompareRows')
 };
 
 async function fetchFiles() {
@@ -99,6 +102,25 @@ async function compareFiles(file1, file2) {
   return res.json();
 }
 
+async function translateAndImportCompareRows(sourceFileName, targetFileName, rows) {
+  const res = await fetch('/api/translations/compare/translate-import', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      sourceFileName,
+      targetFileName,
+      rows
+    })
+  });
+
+  if (!res.ok) {
+    const errorText = await res.text();
+    throw new Error(errorText || `Unable to translate and import compare rows (HTTP ${res.status})`);
+  }
+
+  return res.json();
+}
+
 
 function getFilteredCompareDifferences() {
   if (compareStatusFilter === 'ALL') {
@@ -135,17 +157,43 @@ function renderCompareResult() {
     : `${differences.length} of ${totalDifferences} difference(s)`;
 
   elements.compareResultContainer.classList.remove('hidden');
+  elements.compareTranslateImportBtn.disabled = compareStatusFilter !== 'Missing in file 1' || differences.length === 0;
   elements.compareSummary.textContent = `${elements.compareFile1.value} vs ${elements.compareFile2.value} (${filteredSuffix})`;
 
   elements.compareResultBody.innerHTML = '';
 
   if (differences.length === 0) {
-    elements.compareResultBody.innerHTML = '<tr><td colspan="4">No differences found.</td></tr>';
+    elements.selectAllCompareRows.checked = false;
+    elements.compareResultBody.innerHTML = '<tr><td colspan="5">No differences found.</td></tr>';
     return;
   }
 
+  const filteredKeySet = new Set(differences.map((item) => item.keyPath));
+  compareSelectedKeys = new Set([...compareSelectedKeys].filter((keyPath) => filteredKeySet.has(keyPath)));
+
+  const areAllSelected = differences.length > 0 && differences.every((item) => compareSelectedKeys.has(item.keyPath));
+  elements.selectAllCompareRows.checked = areAllSelected;
+
   differences.forEach((item) => {
     const tr = document.createElement('tr');
+
+    const checkboxTd = document.createElement('td');
+    const rowCheckbox = document.createElement('input');
+    rowCheckbox.type = 'checkbox';
+    rowCheckbox.className = 'checkbox';
+    rowCheckbox.checked = compareSelectedKeys.has(item.keyPath);
+    rowCheckbox.addEventListener('change', (e) => {
+      if (e.target.checked) {
+        compareSelectedKeys.add(item.keyPath);
+      } else {
+        compareSelectedKeys.delete(item.keyPath);
+      }
+
+      const allSelected = differences.length > 0 && differences.every((entry) => compareSelectedKeys.has(entry.keyPath));
+      elements.selectAllCompareRows.checked = allSelected;
+    });
+    checkboxTd.appendChild(rowCheckbox);
+    tr.appendChild(checkboxTd);
 
     const keyPathTd = document.createElement('td');
     keyPathTd.textContent = item.keyPath || '';
@@ -170,8 +218,50 @@ function renderCompareResult() {
 function showCompareResult(result) {
   compareDifferences = result.differences || [];
   compareStatusFilter = 'ALL';
+  compareSelectedKeys = new Set(compareDifferences.map((item) => item.keyPath));
   renderCompareStatusFilterOptions();
   renderCompareResult();
+}
+
+function splitKeyPath(keyPath) {
+  const separatorIndex = (keyPath || '').indexOf('.');
+  if (separatorIndex <= 0 || separatorIndex === keyPath.length - 1) {
+    throw new Error(`Invalid key path: ${keyPath}`);
+  }
+
+  return {
+    section: keyPath.slice(0, separatorIndex),
+    key: keyPath.slice(separatorIndex + 1)
+  };
+}
+
+async function handleCompareTranslateImport() {
+  if (compareStatusFilter !== 'Missing in file 1') {
+    alert('Translate and Import is available when status filter is Missing in file 1.');
+    return;
+  }
+
+  const selectedDifferences = getFilteredCompareDifferences().filter((item) => compareSelectedKeys.has(item.keyPath));
+  if (selectedDifferences.length === 0) {
+    alert('Please select at least one compare result row.');
+    return;
+  }
+
+  const rowsToTranslate = selectedDifferences.map((item) => {
+    const { section, key } = splitKeyPath(item.keyPath || '');
+    return {
+      section,
+      key,
+      text: item.valueInFile2 || ''
+    };
+  });
+
+  const fileB = elements.compareFile2.value;
+  const result = await translateAndImportCompareRows(fileB, fileB, rowsToTranslate);
+  showSuccessMessage(`Translated and imported ${Number(result.textCount || 0)} row(s) into ${result.outputFileName}.`);
+
+  const compareResult = await compareFiles(elements.compareFile1.value, fileB);
+  showCompareResult(compareResult);
 }
 
 async function loadRows() {
@@ -622,6 +712,16 @@ elements.compareStatusFilter.addEventListener('change', () => {
   compareStatusFilter = elements.compareStatusFilter.value;
   renderCompareResult();
 });
+elements.selectAllCompareRows.addEventListener('change', (e) => {
+  const differences = getFilteredCompareDifferences();
+  if (e.target.checked) {
+    differences.forEach((item) => compareSelectedKeys.add(item.keyPath));
+  } else {
+    differences.forEach((item) => compareSelectedKeys.delete(item.keyPath));
+  }
+  renderCompareResult();
+});
+elements.compareTranslateImportBtn.addEventListener('click', () => handleCompareTranslateImport().catch((e) => alert(e.message)));
 elements.translationForm.addEventListener('submit', (e) => handleSubmit(e).catch((error) => alert(error.message)));
 elements.closeValueDialog.addEventListener('click', closeValueDialog);
 elements.cancelValueDialog.addEventListener('click', closeValueDialog);

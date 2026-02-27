@@ -400,6 +400,12 @@ body {
     font-size: 14px;
 }
 
+.compare-actions-row {
+    display: flex;
+    justify-content: flex-end;
+    margin-bottom: 10px;
+}
+
 .compare-table td,
 .compare-table th {
     font-size: 13px;
