@@ -75,6 +75,14 @@
                             <button type="button" class="btn btn-outline btn-sm" id="nextBtn">Next</button>
                         </div>
                         <div class="footer-actions">
+                            <button
+                                    type="button"
+                                    class="btn-icon label-prefix-info-btn"
+                                    id="labelPrefixInfoBtn"
+                                    aria-label="Show label prefix reference"
+                                    title="Show label prefix reference">
+                                i
+                            </button>
                             <button type="button" class="btn btn-outline" id="newLabelBtn">New label</button>
                             <button type="submit" class="btn btn-primary">Save current rows</button>
                         </div>
@@ -166,6 +174,50 @@
             <div class="dialog-footer">
                 <button type="button" class="btn btn-outline" id="cancelValueDialog">Cancel</button>
                 <button type="button" class="btn btn-primary" id="saveValueDialog">Apply</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="labelPrefixDialog" class="dialog-overlay" aria-hidden="true">
+        <div class="dialog-content label-prefix-dialog-content">
+            <div class="dialog-header">
+                <h4 class="dialog-title">Label prefix reference</h4>
+                <button type="button" id="closeLabelPrefixDialog" class="dialog-close" aria-label="Close">&times;</button>
+            </div>
+            <div class="dialog-body">
+                <div class="table-container label-prefix-table-container">
+                    <table class="data-table label-prefix-table">
+                        <thead>
+                        <tr>
+                            <th>Prefix</th>
+                            <th>Type/Purpose</th>
+                        </tr>
+                        </thead>
+                        <tbody>
+                        <tr><td>b.</td><td>Button</td></tr>
+                        <tr><td>c.</td><td>Check box</td></tr>
+                        <tr><td>dv.</td><td>Data value</td></tr>
+                        <tr><td>e.</td><td>Error message</td></tr>
+                        <tr><td>f.</td><td>Not currently used</td></tr>
+                        <tr><td>g.</td><td>Group box (Windows forms applications)</td></tr>
+                        <tr><td>h.</td><td>Table column heading</td></tr>
+                        <tr><td>i.</td><td>Information message</td></tr>
+                        <tr><td>l.</td><td>Label</td></tr>
+                        <tr><td>m.</td><td>Menu item</td></tr>
+                        <tr><td>n.</td><td>Narrative text (text not obviously associated with a specific control)</td></tr>
+                        <tr><td>p.</td><td>Panel title</td></tr>
+                        <tr><td>s.</td><td>Message from app server (business logic)</td></tr>
+                        <tr><td>sp.</td><td>Do not use</td></tr>
+                        <tr><td>spl.</td><td>Generic app server validation error (do not use)</td></tr>
+                        <tr><td>t.</td><td>Title (page or screen)</td></tr>
+                        <tr><td>tt.</td><td>Tool tip</td></tr>
+                        <tr><td>v.</td><td>Validation error message</td></tr>
+                        <tr><td>w.</td><td>Warning message</td></tr>
+                        <tr><td>x.</td><td>No standard (do not use)</td></tr>
+                        <tr><td>z.</td><td>No standard (do not use)</td></tr>
+                        </tbody>
+                    </table>
+                </div>
             </div>
         </div>
     </div>

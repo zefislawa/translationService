@@ -34,6 +34,9 @@ const elements = {
   closeValueDialog: document.getElementById('closeValueDialog'),
   cancelValueDialog: document.getElementById('cancelValueDialog'),
   saveValueDialog: document.getElementById('saveValueDialog'),
+  labelPrefixInfoBtn: document.getElementById('labelPrefixInfoBtn'),
+  labelPrefixDialog: document.getElementById('labelPrefixDialog'),
+  closeLabelPrefixDialog: document.getElementById('closeLabelPrefixDialog'),
   compareFile1: document.getElementById('compareFile1'),
   compareFile2: document.getElementById('compareFile2'),
   compareStatusFilter: document.getElementById('compareStatusFilter'),
@@ -467,6 +470,16 @@ function saveValueDialog() {
   closeValueDialog();
 }
 
+function openLabelPrefixDialog() {
+  elements.labelPrefixDialog.classList.add('show');
+  elements.labelPrefixDialog.setAttribute('aria-hidden', 'false');
+}
+
+function closeLabelPrefixDialog() {
+  elements.labelPrefixDialog.classList.remove('show');
+  elements.labelPrefixDialog.setAttribute('aria-hidden', 'true');
+}
+
 function handleSelectAllRows(e) {
   const isChecked = e.target.checked;
   rows.forEach((row) => {
@@ -727,9 +740,26 @@ elements.translationForm.addEventListener('submit', (e) => handleSubmit(e).catch
 elements.closeValueDialog.addEventListener('click', closeValueDialog);
 elements.cancelValueDialog.addEventListener('click', closeValueDialog);
 elements.saveValueDialog.addEventListener('click', saveValueDialog);
+elements.labelPrefixInfoBtn.addEventListener('click', openLabelPrefixDialog);
+elements.closeLabelPrefixDialog.addEventListener('click', closeLabelPrefixDialog);
+elements.labelPrefixDialog.addEventListener('click', (e) => {
+  if (e.target === elements.labelPrefixDialog) {
+    closeLabelPrefixDialog();
+  }
+});
 elements.valueDialog.addEventListener('click', (e) => {
   if (e.target === elements.valueDialog) {
     closeValueDialog();
+  }
+});
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    if (elements.labelPrefixDialog.classList.contains('show')) {
+      closeLabelPrefixDialog();
+    } else if (elements.valueDialog.classList.contains('show')) {
+      closeValueDialog();
+    }
   }
 });
 

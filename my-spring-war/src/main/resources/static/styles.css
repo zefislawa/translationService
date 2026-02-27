@@ -425,6 +425,33 @@ body {
     background-color: #eff6ff;
 }
 
+.label-prefix-info-btn {
+    width: 32px;
+    height: 32px;
+    border-radius: 999px;
+    font-size: 14px;
+    font-weight: 700;
+    font-family: Georgia, serif;
+    color: var(--c-primary);
+    border-color: #bfdbfe;
+    background-color: #eff6ff;
+}
+
+.label-prefix-dialog-content {
+    max-width: 860px;
+}
+
+.label-prefix-table-container {
+    max-height: 60vh;
+}
+
+.label-prefix-table td:first-child,
+.label-prefix-table th:first-child {
+    width: 120px;
+    white-space: nowrap;
+    font-weight: 600;
+}
+
 .compare-table .compare-col-key {
     width: 20%;
 }
