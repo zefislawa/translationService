@@ -123,6 +123,14 @@
                 <div id="compareResultContainer" class="compare-result hidden" aria-live="polite">
                     <p id="compareSummary" class="compare-summary"></p>
                     <div class="compare-actions-row">
+                        <button
+                                type="button"
+                                class="btn-icon compare-info-icon"
+                                id="compareTranslateImportInfo"
+                                aria-label="How Translate and Import works"
+                                title="Translate and Import works only for rows with status Missing in file 1. It translates the selected File B values and imports them into File A using the same key.">
+                            i
+                        </button>
                         <button type="button" class="btn btn-primary" id="compareTranslateImportBtn">Translate and Import</button>
                     </div>
                     <div class="table-container">
@@ -132,9 +140,9 @@
                                 <th class="col-checkbox">
                                     <input type="checkbox" id="selectAllCompareRows" class="checkbox" aria-label="Select all compare rows">
                                 </th>
-                                <th>Key path</th>
-                                <th>File A value</th>
-                                <th>File B value</th>
+                                <th class="compare-col-key">Key</th>
+                                <th class="compare-col-value">File A value</th>
+                                <th class="compare-col-value">File B value</th>
                                 <th>Status</th>
                             </tr>
                             </thead>
