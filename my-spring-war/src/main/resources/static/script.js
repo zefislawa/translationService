@@ -256,11 +256,12 @@ async function handleCompareTranslateImport() {
     };
   });
 
-  const fileB = elements.compareFile2.value;
-  const result = await translateAndImportCompareRows(fileB, fileB, rowsToTranslate);
+  const sourceFileName = elements.compareFile2.value;
+  const targetFileName = elements.compareFile1.value;
+  const result = await translateAndImportCompareRows(sourceFileName, targetFileName, rowsToTranslate);
   showSuccessMessage(`Translated and imported ${Number(result.textCount || 0)} row(s) into ${result.outputFileName}.`);
 
-  const compareResult = await compareFiles(elements.compareFile1.value, fileB);
+  const compareResult = await compareFiles(targetFileName, sourceFileName);
   showCompareResult(compareResult);
 }
 
