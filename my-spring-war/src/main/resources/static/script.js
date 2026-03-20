@@ -10,6 +10,7 @@ let preferredDisplayLanguage = "";
 let compareDifferences = [];
 let compareStatusFilter = 'ALL';
 let compareSelectedKeys = new Set();
+let originalRowsSnapshot = new Map();
 
 const elements = {
   successMessage: document.getElementById('successMessage'),
@@ -28,6 +29,7 @@ const elements = {
   translateBtn: document.getElementById('translateBtn'),
   translationForm: document.getElementById('translationForm'),
   newLabelBtn: document.getElementById('newLabelBtn'),
+  exportDeltaBtn: document.getElementById('exportDeltaBtn'),
   valueDialog: document.getElementById('valueDialog'),
   valueDialogTitle: document.getElementById('valueDialogTitle'),
   valueDialogTextarea: document.getElementById('valueDialogTextarea'),
@@ -226,6 +228,132 @@ function showCompareResult(result) {
   renderCompareResult();
 }
 
+function buildRowIdentity(section, key) {
+  return `${section || ''}.${key || ''}`;
+}
+
+function createRowSnapshot(row) {
+  return {
+    id: buildRowIdentity(row.section, row.column1),
+    section: row.section || '',
+    key: row.column1 || '',
+    text: row.column2 || '',
+    reference: row.reference || ''
+  };
+}
+
+function rebuildOriginalRowsSnapshot() {
+  originalRowsSnapshot = new Map(
+    rows
+      .filter((row) => !(row.isCustom === true || row.section === 'custom'))
+      .map((row) => {
+        const snapshot = createRowSnapshot(row);
+        return [snapshot.id, snapshot];
+      })
+  );
+}
+
+function normalizeRowForDelta(row) {
+  const isCustomRow = row.isCustom === true || row.section === 'custom';
+  const rawKey = (row.column1 || '').trim();
+
+  if (isCustomRow) {
+    if (!rawKey) {
+      return null;
+    }
+
+    const keyMatch = /^([^.]+)\.(.+)$/.exec(rawKey);
+    if (!keyMatch) {
+      throw new Error('New label key must include a section prefix, for example: b.newKey');
+    }
+
+    return {
+      section: keyMatch[1].trim(),
+      key: keyMatch[2].trim(),
+      text: row.column2 || '',
+      reference: row.reference || ''
+    };
+  }
+
+  return {
+    section: row.section || '',
+    key: rawKey,
+    text: row.column2 || '',
+    reference: row.reference || ''
+  };
+}
+
+function getDeltaRows() {
+  return rows.reduce((deltaRows, row) => {
+    const normalizedRow = normalizeRowForDelta(row);
+    if (!normalizedRow) {
+      return deltaRows;
+    }
+
+    const rowId = buildRowIdentity(normalizedRow.section, normalizedRow.key);
+    const originalRow = originalRowsSnapshot.get(rowId);
+    const currentSnapshot = {
+      id: rowId,
+      ...normalizedRow,
+      changeType: originalRow ? 'Changed' : 'Created'
+    };
+
+    if (!originalRow || originalRow.text !== currentSnapshot.text) {
+      deltaRows.push(currentSnapshot);
+    }
+
+    return deltaRows;
+  }, []);
+}
+
+function buildDeltaExportPayload(deltaRows) {
+  return deltaRows.reduce((payload, row) => {
+    payload[row.section] = payload[row.section] || {};
+    payload[row.section][row.key] = row.text;
+    return payload;
+  }, {});
+}
+
+function buildDeltaFileName() {
+  const baseName = (selectedFile || 'translations.json').replace(/\.json$/i, '');
+  return `${baseName}-delta.json`;
+}
+
+function downloadJsonFile(fileName, payload) {
+  const json = JSON.stringify(payload, null, 2);
+  const blob = new Blob([json], { type: 'application/json' });
+  const objectUrl = URL.createObjectURL(blob);
+  const downloadLink = document.createElement('a');
+  downloadLink.href = objectUrl;
+  downloadLink.download = fileName;
+  document.body.appendChild(downloadLink);
+  downloadLink.click();
+  document.body.removeChild(downloadLink);
+  URL.revokeObjectURL(objectUrl);
+}
+
+function handleExportDelta() {
+  if (!selectedFile) {
+    alert('Please choose and load a file first.');
+    return;
+  }
+
+  if (elements.fileSelect.value !== selectedFile) {
+    alert('Selected file changed. Click Select to load the chosen file before exporting.');
+    return;
+  }
+
+  const deltaRows = getDeltaRows();
+  if (deltaRows.length === 0) {
+    alert('There are no changed or created rows to export.');
+    return;
+  }
+
+  const deltaPayload = buildDeltaExportPayload(deltaRows);
+  downloadJsonFile(buildDeltaFileName(), deltaPayload);
+  showSuccessMessage(`Exported ${deltaRows.length} changed/created row(s) to JSON.`);
+}
+
 function splitKeyPath(keyPath) {
   const separatorIndex = (keyPath || '').indexOf('.');
   if (separatorIndex <= 0 || separatorIndex === keyPath.length - 1) {
@@ -300,6 +428,7 @@ async function loadRows() {
     selected: true
   }));
 
+  rebuildOriginalRowsSnapshot();
   currentPage = 1;
   renderTable();
   showSuccessMessage(`Loaded ${rows.length} rows from ${selectedFile}.`);
@@ -711,6 +840,7 @@ elements.selectFileBtn.addEventListener('click', () => loadRows().catch((e) => a
 elements.searchInput.addEventListener('input', handleSearch);
 elements.rowsPerPageSelect.addEventListener('change', handleRowsPerPageChange);
 elements.newLabelBtn.addEventListener('click', handleAddNewLabel);
+elements.exportDeltaBtn.addEventListener('click', handleExportDelta);
 elements.prevBtn.addEventListener('click', () => {
   if (currentPage > 1) {
     currentPage -= 1;
