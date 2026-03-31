@@ -11,6 +11,8 @@ let compareDifferences = [];
 let compareStatusFilter = 'ALL';
 let compareSelectedKeys = new Set();
 let originalRowsSnapshot = new Map();
+let availableFiles = [];
+let mergedPayload = null;
 
 const elements = {
   successMessage: document.getElementById('successMessage'),
@@ -47,7 +49,14 @@ const elements = {
   compareResultContainer: document.getElementById('compareResultContainer'),
   compareSummary: document.getElementById('compareSummary'),
   compareResultBody: document.getElementById('compareResultBody'),
-  selectAllCompareRows: document.getElementById('selectAllCompareRows')
+  selectAllCompareRows: document.getElementById('selectAllCompareRows'),
+  tabButtons: document.querySelectorAll('.tab-button'),
+  tabPanels: document.querySelectorAll('.tab-panel'),
+  mergeDefaultFile: document.getElementById('mergeDefaultFile'),
+  mergeDeltaFile: document.getElementById('mergeDeltaFile'),
+  runDeepMergeBtn: document.getElementById('runDeepMergeBtn'),
+  downloadMergedBtn: document.getElementById('downloadMergedBtn'),
+  deepMergeOutput: document.getElementById('deepMergeOutput')
 };
 
 async function fetchFiles() {
@@ -66,6 +75,120 @@ async function fetchSupportedLanguages() {
   const res = await fetch('/api/translations/supported-languages');
   if (!res.ok) throw new Error(`Unable to load supported languages (HTTP ${res.status})`);
   return res.json();
+}
+
+async function fetchRowsForFile(fileName) {
+  const res = await fetch('/api/translations/load', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ fileName })
+  });
+
+  if (!res.ok) throw new Error(`Unable to load ${fileName} for deep merge (HTTP ${res.status})`);
+  return res.json();
+}
+
+function isPlainObject(value) {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function deepMerge(defaultObject, deltaObject) {
+  if (!isPlainObject(defaultObject) || !isPlainObject(deltaObject)) {
+    return deltaObject === undefined ? defaultObject : deltaObject;
+  }
+
+  const merged = { ...defaultObject };
+  Object.keys(deltaObject).forEach((key) => {
+    const defaultValue = defaultObject[key];
+    const deltaValue = deltaObject[key];
+    merged[key] = deepMerge(defaultValue, deltaValue);
+  });
+
+  return merged;
+}
+
+function rowsToNestedObject(rowsList) {
+  return (rowsList || []).reduce((payload, row) => {
+    const section = row.section || '';
+    const key = row.key || '';
+    if (!section || !key) {
+      return payload;
+    }
+
+    payload[section] = payload[section] || {};
+    payload[section][key] = row.text || '';
+    return payload;
+  }, {});
+}
+
+function buildMergedFileName(defaultFileName) {
+  const baseName = (defaultFileName || 'translations').replace(/\.json$/i, '');
+  return `${baseName}-merged.json`;
+}
+
+function renderDeepMergeOutput(content) {
+  elements.deepMergeOutput.textContent = content;
+}
+
+function populateDeepMergeFileOptions(files) {
+  const defaultSelection = elements.mergeDefaultFile.value;
+  const deltaSelection = elements.mergeDeltaFile.value;
+  const defaultLanguageFile = files.find((fileName) => fileName.toLowerCase() === `${(preferredDisplayLanguage || '').toLowerCase()}.json`);
+  const fallbackDefaultFile = defaultLanguageFile || files.find((fileName) => !fileName.toLowerCase().includes('-delta')) || files[0] || '';
+  const fallbackDeltaFile = files.find((fileName) => fileName.toLowerCase().includes('-delta')) || files[0] || '';
+
+  [elements.mergeDefaultFile, elements.mergeDeltaFile].forEach((select) => {
+    select.innerHTML = '';
+    files.forEach((name) => {
+      const option = document.createElement('option');
+      option.value = name;
+      option.textContent = name;
+      select.appendChild(option);
+    });
+  });
+
+  elements.mergeDefaultFile.value = files.includes(defaultSelection) ? defaultSelection : fallbackDefaultFile;
+  elements.mergeDeltaFile.value = files.includes(deltaSelection) ? deltaSelection : fallbackDeltaFile;
+}
+
+async function runDeepMerge() {
+  const defaultFileName = elements.mergeDefaultFile.value;
+  const deltaFileName = elements.mergeDeltaFile.value;
+  if (!defaultFileName || !deltaFileName) {
+    throw new Error('Please select both default and delta files.');
+  }
+
+  const [defaultRows, deltaRows] = await Promise.all([
+    fetchRowsForFile(defaultFileName),
+    fetchRowsForFile(deltaFileName)
+  ]);
+
+  const defaultPayload = rowsToNestedObject(defaultRows);
+  const deltaPayload = rowsToNestedObject(deltaRows);
+  mergedPayload = deepMerge(defaultPayload, deltaPayload);
+  renderDeepMergeOutput(JSON.stringify(mergedPayload, null, 2));
+  showSuccessMessage(`Deep merge completed using ${defaultFileName} and ${deltaFileName}.`);
+}
+
+function handleDownloadMergedFile() {
+  if (!mergedPayload) {
+    alert('Run deep merge first.');
+    return;
+  }
+
+  downloadJsonFile(buildMergedFileName(elements.mergeDefaultFile.value), mergedPayload);
+}
+
+function activateTab(tabTargetId) {
+  elements.tabButtons.forEach((button) => {
+    const isActive = button.dataset.tabTarget === tabTargetId;
+    button.classList.toggle('active', isActive);
+    button.setAttribute('aria-selected', String(isActive));
+  });
+
+  elements.tabPanels.forEach((panel) => {
+    panel.classList.toggle('active', panel.id === tabTargetId);
+  });
 }
 
 function renderSupportedLanguagesUnavailable() {
@@ -646,6 +769,7 @@ async function handleLoadFiles() {
 
   const data = await fetchFiles();
   const files = data.files || [];
+  availableFiles = files;
 
   elements.fileSelect.innerHTML = '';
   files.forEach((name) => {
@@ -690,6 +814,8 @@ async function handleLoadFiles() {
     renderSupportedLanguagesUnavailable();
     showSuccessMessage(`Loaded ${files.length} files. Unable to load Google supported languages.`);
   }
+
+  populateDeepMergeFileOptions(availableFiles);
 }
 
 
@@ -874,6 +1000,11 @@ elements.selectAllCompareRows.addEventListener('change', (e) => {
 });
 elements.compareTranslateImportBtn.addEventListener('click', () => handleCompareTranslateImport().catch((e) => alert(e.message)));
 elements.translationForm.addEventListener('submit', (e) => handleSubmit(e).catch((error) => alert(error.message)));
+elements.tabButtons.forEach((button) => {
+  button.addEventListener('click', () => activateTab(button.dataset.tabTarget));
+});
+elements.runDeepMergeBtn.addEventListener('click', () => runDeepMerge().catch((e) => alert(e.message)));
+elements.downloadMergedBtn.addEventListener('click', handleDownloadMergedFile);
 elements.closeValueDialog.addEventListener('click', closeValueDialog);
 elements.cancelValueDialog.addEventListener('click', closeValueDialog);
 elements.saveValueDialog.addEventListener('click', saveValueDialog);
@@ -905,6 +1036,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     await handleLoadFiles();
     if (elements.fileSelect.value) {
       await loadRows();
+    }
+    if (availableFiles.length > 0) {
+      await runDeepMerge();
     }
   } catch (e) {
     console.error(e);

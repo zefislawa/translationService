@@ -17,6 +17,18 @@
                 <span id="successMessageText">Translation was successful</span>
             </div>
 
+            <div class="tabs-card">
+                <div class="tabs-nav" role="tablist" aria-label="Main sections">
+                    <button type="button" class="tab-button active" id="tabTranslateCreateCompare" data-tab-target="translateCreateComparePanel" role="tab" aria-selected="true" aria-controls="translateCreateComparePanel">
+                        Translate, Create, Compare
+                    </button>
+                    <button type="button" class="tab-button" id="tabDeepMerge" data-tab-target="deepMergePanel" role="tab" aria-selected="false" aria-controls="deepMergePanel">
+                        Deep merge
+                    </button>
+                </div>
+            </div>
+
+            <div id="translateCreateComparePanel" class="tab-panel active" role="tabpanel" aria-labelledby="tabTranslateCreateCompare">
             <div class="section-card">
                 <div class="form-header">
                     <h2 class="section-heading">File and search</h2>
@@ -157,6 +169,37 @@
                             </thead>
                             <tbody id="compareResultBody"></tbody>
                         </table>
+                    </div>
+                </div>
+            </div>
+            </div>
+
+            <div id="deepMergePanel" class="tab-panel" role="tabpanel" aria-labelledby="tabDeepMerge">
+                <div class="section-card">
+                    <div class="translation-section">
+                        <h3 class="section-title">Deep merge</h3>
+                        <div class="translation-controls compare-controls">
+                            <div class="form-group">
+                                <label class="form-label">Default language file</label>
+                                <select id="mergeDefaultFile" class="select-input"></select>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Delta file</label>
+                                <select id="mergeDeltaFile" class="select-input"></select>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label invisible">Action</label>
+                                <button type="button" class="btn btn-primary" id="runDeepMergeBtn">Run deep merge</button>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label invisible">Action</label>
+                                <button type="button" class="btn btn-outline" id="downloadMergedBtn">Download merged JSON</button>
+                            </div>
+                        </div>
+                        <p class="merge-logic-hint">Merge logic: if label is not in site, use label from default. If label is in site, use label from site.</p>
+                        <div class="table-container merge-output-container">
+                            <pre id="deepMergeOutput" class="merge-output">Deep merge output will appear here.</pre>
+                        </div>
                     </div>
                 </div>
             </div>
