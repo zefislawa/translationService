@@ -25,6 +25,7 @@ class TranslationServiceTest {
                 "dummy-api-key",
                 "dummy-project-id",
                 "en",
+                "en",
                 new ObjectMapper(),
                 new RestTemplateBuilder()
         );
@@ -71,6 +72,7 @@ class TranslationServiceTest {
                 "dummy-api-key",
                 "dummy-project-id",
                 "en",
+                "en",
                 new ObjectMapper(),
                 new RestTemplateBuilder()
         );
@@ -108,6 +110,7 @@ class TranslationServiceTest {
                 tempDir.toString(),
                 "dummy-api-key",
                 "dummy-project-id",
+                "en",
                 "en",
                 new ObjectMapper(),
                 new RestTemplateBuilder()
