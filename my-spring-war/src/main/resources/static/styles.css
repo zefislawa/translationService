@@ -39,6 +39,44 @@ body {
     background: transparent;
 }
 
+.tabs-card {
+    background: var(--c-surface);
+    border: 1px solid var(--c-border);
+    border-radius: var(--c-radius);
+    box-shadow: var(--c-shadow);
+    padding: 0 18px;
+}
+
+.tabs-nav {
+    display: flex;
+    gap: 24px;
+}
+
+.tab-button {
+    appearance: none;
+    border: none;
+    border-bottom: 3px solid transparent;
+    background: transparent;
+    color: #5f6368;
+    font-size: 14px;
+    font-weight: 500;
+    padding: 14px 0 12px;
+    cursor: pointer;
+}
+
+.tab-button.active {
+    color: var(--c-primary);
+    border-bottom-color: var(--c-primary);
+}
+
+.tab-panel {
+    display: none;
+}
+
+.tab-panel.active {
+    display: block;
+}
+
 .section-card {
     background: var(--c-surface);
     border: 1px solid var(--c-border);
@@ -462,6 +500,27 @@ body {
 
 .compare-table .compare-col-status {
     width: 14%;
+}
+
+.merge-logic-hint {
+    color: #374151;
+    font-size: 14px;
+    margin-bottom: 12px;
+}
+
+.merge-output-container {
+    max-height: 52vh;
+}
+
+.merge-output {
+    margin: 0;
+    padding: 12px;
+    min-height: 180px;
+    font-size: 13px;
+    white-space: pre-wrap;
+    word-break: break-word;
+    color: #111827;
+    background-color: #f9fafb;
 }
 
 .dialog-overlay {
