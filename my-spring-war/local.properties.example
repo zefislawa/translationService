@@ -16,3 +16,8 @@ myapp.local.supportedLanguagesDisplayLocale=en
 
 # Default target language pre-selected in the UI.
 myapp.local.uiPreferredTargetLanguage=fr
+
+# Reference language used to populate the "Reference" column.
+# Example values: en, fr
+myapp.local.referenceLanguageFile=en
+

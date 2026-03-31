@@ -43,12 +43,14 @@ public class TranslationService {
     private final String googleApiKey;
     private final String googleProjectId;
     private final String supportedLanguagesDisplayLocale;
+    private final String referenceLanguageFile;
 
     public TranslationService(
             @Value("${myapp.dataDir}") String defaultDataDir,
             @Value("${myapp.google.apiKey}") String googleApiKey,
             @Value("${myapp.google.projectId}") String googleProjectId,
             @Value("${myapp.google.supportedLanguagesDisplayLocale:en}") String supportedLanguagesDisplayLocale,
+            @Value("${myapp.referenceLanguageFile:en}") String referenceLanguageFile,
             ObjectMapper mapper,
             RestTemplateBuilder restTemplateBuilder
     ) throws Exception {
@@ -56,6 +58,7 @@ public class TranslationService {
         this.googleApiKey = googleApiKey;
         this.googleProjectId = googleProjectId;
         this.supportedLanguagesDisplayLocale = supportedLanguagesDisplayLocale;
+        this.referenceLanguageFile = referenceLanguageFile;
         this.mapper = mapper;
         this.restTemplate = restTemplateBuilder
                 .setConnectTimeout(Duration.ofSeconds(15))
@@ -86,7 +89,7 @@ public class TranslationService {
             return List.of();
         }
 
-        Path englishFile = resolveJsonFile(customPath, "en.json");
+        Path englishFile = resolveJsonFile(customPath, normalizeReferenceLanguageFile(referenceLanguageFile));
 
         Object raw = mapper.readValue(file.toFile(), Object.class);
         if (raw == null) return List.of();
@@ -117,6 +120,18 @@ public class TranslationService {
         }
 
         return rows;
+    }
+
+
+    private String normalizeReferenceLanguageFile(String configuredReferenceLanguageFile) {
+        if (configuredReferenceLanguageFile == null || configuredReferenceLanguageFile.isBlank()) {
+            return "en.json";
+        }
+
+        String trimmedValue = configuredReferenceLanguageFile.trim();
+        return trimmedValue.toLowerCase().endsWith(".json")
+                ? trimmedValue
+                : trimmedValue + ".json";
     }
 
     @SuppressWarnings("unchecked")
