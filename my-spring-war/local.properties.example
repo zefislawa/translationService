@@ -1,0 +1,18 @@
+# Local overrides for development
+# Copy this file to local.properties and fill in your values.
+
+# Folder that contains translation JSON files.
+myapp.local.dataDir=data
+
+# Google Cloud Translation API key.
+myapp.local.googleApiKey=
+
+# Optional Google project id (only needed for some setups).
+myapp.local.googleProjectId=
+
+# Language code used by Google when returning the display names
+# in /languages API (for example: en, fr, de, ar).
+myapp.local.supportedLanguagesDisplayLocale=en
+
+# Default target language pre-selected in the UI.
+myapp.local.uiPreferredTargetLanguage=fr
