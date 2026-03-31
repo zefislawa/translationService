@@ -42,20 +42,20 @@ public class TranslationService {
     private final RestTemplate restTemplate;
     private final String googleApiKey;
     private final String googleProjectId;
-    private final String displayLanguageCode;
+    private final String supportedLanguagesDisplayLocale;
 
     public TranslationService(
             @Value("${myapp.dataDir}") String defaultDataDir,
             @Value("${myapp.google.apiKey}") String googleApiKey,
             @Value("${myapp.google.projectId}") String googleProjectId,
-            @Value("${myapp.google.displayLanguageCode:en}") String displayLanguageCode,
+            @Value("${myapp.google.supportedLanguagesDisplayLocale:en}") String supportedLanguagesDisplayLocale,
             ObjectMapper mapper,
             RestTemplateBuilder restTemplateBuilder
     ) throws Exception {
         this.defaultDataDir = Path.of(defaultDataDir).toAbsolutePath();
         this.googleApiKey = googleApiKey;
         this.googleProjectId = googleProjectId;
-        this.displayLanguageCode = displayLanguageCode;
+        this.supportedLanguagesDisplayLocale = supportedLanguagesDisplayLocale;
         this.mapper = mapper;
         this.restTemplate = restTemplateBuilder
                 .setConnectTimeout(Duration.ofSeconds(15))
@@ -345,7 +345,7 @@ public class TranslationService {
         String url = UriComponentsBuilder
                 .fromHttpUrl("https://translation.googleapis.com/language/translate/v2/languages")
                 .queryParam("key", googleApiKey)
-                .queryParam("target", displayLanguageCode)
+                .queryParam("target", supportedLanguagesDisplayLocale)
                 .toUriString();
 
         ResponseEntity<GoogleSupportedLanguagesResponse> response = restTemplate.getForEntity(
