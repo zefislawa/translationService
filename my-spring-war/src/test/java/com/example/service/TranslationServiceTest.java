@@ -1,6 +1,7 @@
 package com.example.service;
 
 import com.example.api.dto.TranslationCompareResult;
+import com.example.api.dto.TranslationExportResult;
 import com.example.api.dto.TranslationRow;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
@@ -140,6 +141,34 @@ class TranslationServiceTest {
                     "newKey" : "neuer Wert"
                   }
                 }""", actual);
+    }
+
+    @Test
+    void translateAndStoreFallsBackToReferenceLanguageWhenFileNameIsNotLanguageCode() throws Exception {
+        TranslationService service = new TranslationService(
+                tempDir.toString(),
+                "dummy-api-key",
+                "dummy-project-id",
+                "en",
+                "en",
+                new ObjectMapper(),
+                new RestTemplateBuilder()
+        );
+
+        List<TranslationRow> rows = List.of(
+                new TranslationRow("b", "Apply", "Apply", "")
+        );
+
+        TranslationExportResult result = service.translateAndStore(null, "risky_strings_subset.json", "en", rows);
+
+        assertEquals("en", result.language());
+        assertEquals(1, result.count());
+        assertEquals("""
+                {
+                  "b" : {
+                    "Apply" : "Apply"
+                  }
+                }""", Files.readString(tempDir.resolve("en.json")));
     }
 
 }
