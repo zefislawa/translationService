@@ -29,6 +29,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.TreeSet;
 import java.util.Objects;
@@ -170,9 +171,11 @@ public class TranslationService {
             throw new IllegalArgumentException("targetLanguage is required");
         }
 
-        String sourceLanguage = extractLanguageFromFileName(fileName);
+        String sourceLanguage = resolveSourceLanguage(fileName);
         List<String> contents = rows.stream().map(TranslationRow::getText).toList();
-        List<String> translatedTexts = callGoogleTranslate(sourceLanguage, targetLanguage, contents);
+        List<String> translatedTexts = sourceLanguage.equalsIgnoreCase(targetLanguage)
+                ? contents
+                : callGoogleTranslate(sourceLanguage, targetLanguage, contents);
 
         if (translatedTexts.size() != rows.size()) {
             throw new IllegalStateException("Google Translate returned an unexpected number of translated strings");
@@ -442,7 +445,25 @@ public class TranslationService {
         if (normalized.isBlank()) {
             throw new IllegalArgumentException("Cannot detect source language from file name: " + fileName);
         }
+        if (!normalized.matches("^[A-Za-z]{2,3}(?:[-_][A-Za-z0-9]{2,8})*$")) {
+            throw new IllegalArgumentException("Invalid language code in file name: " + fileName);
+        }
         return normalized;
+    }
+
+    private String resolveSourceLanguage(String fileName) {
+        String fallbackLanguage = extractLanguageFromFileName(normalizeReferenceLanguageFile(referenceLanguageFile));
+
+        if (fileName == null || fileName.isBlank()) {
+            return fallbackLanguage.toLowerCase(Locale.ROOT);
+        }
+
+        String normalized = Path.of(fileName).getFileName().toString().replaceFirst("(?i)\\.json$", "");
+        if (!normalized.matches("^[A-Za-z]{2,3}(?:[-_][A-Za-z0-9]{2,8})*$")) {
+            return fallbackLanguage.toLowerCase(Locale.ROOT);
+        }
+
+        return normalized.toLowerCase(Locale.ROOT);
     }
 
     private record GoogleTranslateRequest(

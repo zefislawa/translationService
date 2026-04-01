@@ -142,4 +142,32 @@ class TranslationServiceTest {
                 }""", actual);
     }
 
+    @Test
+    void translateAndStoreFallsBackToReferenceLanguageWhenFileNameIsNotLanguageCode() throws Exception {
+        TranslationService service = new TranslationService(
+                tempDir.toString(),
+                "dummy-api-key",
+                "dummy-project-id",
+                "en",
+                "en",
+                new ObjectMapper(),
+                new RestTemplateBuilder()
+        );
+
+        List<TranslationRow> rows = List.of(
+                new TranslationRow("b", "Apply", "Apply", "")
+        );
+
+        TranslationExportResult result = service.translateAndStore(null, "risky_strings_subset.json", "en", rows);
+
+        assertEquals("en", result.language());
+        assertEquals(1, result.count());
+        assertEquals("""
+                {
+                  "b" : {
+                    "Apply" : "Apply"
+                  }
+                }""", Files.readString(tempDir.resolve("en.json")));
+    }
+
 }
