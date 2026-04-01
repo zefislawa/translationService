@@ -161,6 +161,7 @@ class TranslationServiceTest {
 
         TranslationExportResult result = service.translateAndStore(null, "risky_strings_subset.json", "en", rows);
 
+        // TranslationExportResult is a POJO (not a record), so use JavaBean getters.
         assertEquals("en", result.getTargetLanguage());
         assertEquals(1, result.getTextCount());
         assertEquals("""
