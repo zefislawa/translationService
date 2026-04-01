@@ -1,6 +1,7 @@
 package com.example.service;
 
 import com.example.api.dto.TranslationCompareResult;
+import com.example.api.dto.TranslationExportResult;
 import com.example.api.dto.TranslationRow;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
