@@ -52,9 +52,14 @@ public class TranslationService {
     private final ObjectMapper mapper;
     private final RestTemplate restTemplate;
     private final String googleApiKey;
+    private final String configuredSourceLanguage;
+    private final String configuredTargetLanguage;
     private final String googleProjectId;
     private final String googleLocation;
+    private final String googleTranslationModel;
+    private final boolean googleGlossaryEnabled;
     private final String googleGlossaryId;
+    private final int googleBatchSize;
     private final String supportedLanguagesDisplayLocale;
     private final String referenceLanguageFile;
     private final String riskyTermsFile;
@@ -71,9 +76,14 @@ public class TranslationService {
     public TranslationService(
             @Value("${myapp.dataDir}") String defaultDataDir,
             @Value("${myapp.google.apiKey}") String googleApiKey,
+            @Value("${myapp.google.sourceLanguage:}") String configuredSourceLanguage,
+            @Value("${myapp.google.targetLanguage:}") String configuredTargetLanguage,
             @Value("${myapp.google.projectId}") String googleProjectId,
             @Value("${myapp.google.location:global}") String googleLocation,
+            @Value("${myapp.google.model:general/translation-llm}") String googleTranslationModel,
+            @Value("${myapp.google.glossaryEnabled:false}") boolean googleGlossaryEnabled,
             @Value("${myapp.google.glossaryId:}") String googleGlossaryId,
+            @Value("${myapp.google.batchSize:50}") int googleBatchSize,
             @Value("${myapp.google.supportedLanguagesDisplayLocale:en}") String supportedLanguagesDisplayLocale,
             @Value("${myapp.referenceLanguageFile:en}") String referenceLanguageFile,
             @Value("${myapp.riskyTermsFile:risky-terms.txt}") String riskyTermsFile,
@@ -82,12 +92,19 @@ public class TranslationService {
     ) throws Exception {
         this.defaultDataDir = Path.of(defaultDataDir).toAbsolutePath();
         this.googleApiKey = googleApiKey;
+        this.configuredSourceLanguage = configuredSourceLanguage;
+        this.configuredTargetLanguage = configuredTargetLanguage;
         this.googleProjectId = googleProjectId;
         this.googleLocation = googleLocation;
+        this.googleTranslationModel = googleTranslationModel;
+        this.googleGlossaryEnabled = googleGlossaryEnabled;
         this.googleGlossaryId = googleGlossaryId;
+        this.googleBatchSize = googleBatchSize;
         this.supportedLanguagesDisplayLocale = supportedLanguagesDisplayLocale;
         this.referenceLanguageFile = referenceLanguageFile;
         this.riskyTermsFile = riskyTermsFile;
+        requireValidBatchSize();
+        validateGlossaryConfiguration();
         this.mapper = mapper;
         this.restTemplate = restTemplateBuilder
                 .setConnectTimeout(Duration.ofSeconds(15))
@@ -513,41 +530,54 @@ public class TranslationService {
                 .queryParam("key", googleApiKey)
                 .toUriString();
 
-        List<String> contents = items.stream().map(PreparedTranslationItem::protectedText).toList();
-        GoogleTranslateTextRequest body = new GoogleTranslateTextRequest(
-                contents,
-                sourceLanguage,
-                targetLanguage,
-                "text/plain",
-                "general/translation-llm",
-                resolveGlossaryConfig()
-        );
+        List<String> allTranslations = new ArrayList<>(items.size());
+        for (int start = 0; start < items.size(); start += googleBatchSize) {
+            int end = Math.min(start + googleBatchSize, items.size());
+            List<String> contents = items.subList(start, end).stream()
+                    .map(PreparedTranslationItem::protectedText)
+                    .toList();
+            GoogleTranslateTextRequest body = new GoogleTranslateTextRequest(
+                    contents,
+                    sourceLanguage,
+                    targetLanguage,
+                    "text/plain",
+                    googleTranslationModel,
+                    resolveGlossaryConfig()
+            );
 
-        HttpHeaders headers = new HttpHeaders();
-        headers.setContentType(MediaType.APPLICATION_JSON);
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_JSON);
 
-        ResponseEntity<GoogleTranslateTextResponse> response = restTemplate.postForEntity(
-                url,
-                new HttpEntity<>(body, headers),
-                GoogleTranslateTextResponse.class
-        );
+            ResponseEntity<GoogleTranslateTextResponse> response = restTemplate.postForEntity(
+                    url,
+                    new HttpEntity<>(body, headers),
+                    GoogleTranslateTextResponse.class
+            );
 
-        GoogleTranslateTextResponse responseBody = response.getBody();
-        if (responseBody == null || responseBody.translations() == null) {
-            throw new IllegalStateException("Google Translate response is empty");
+            GoogleTranslateTextResponse responseBody = response.getBody();
+            if (responseBody == null || responseBody.translations() == null) {
+                throw new IllegalStateException("Google Translate response is empty");
+            }
+
+            List<String> translations = responseBody.translations()
+                    .stream()
+                    .map(GoogleTextTranslation::translatedText)
+                    .toList();
+            List<String> glossaryTranslations = responseBody.glossaryTranslations() == null
+                    ? List.of()
+                    : responseBody.glossaryTranslations().stream()
+                    .map(GoogleTextTranslation::translatedText)
+                    .toList();
+
+            List<String> selectedTranslations = glossaryTranslations.size() == translations.size()
+                    ? glossaryTranslations
+                    : translations;
+            if (selectedTranslations.size() != contents.size()) {
+                throw new IllegalStateException("Google Translate returned an unexpected number of translated strings");
+            }
+            allTranslations.addAll(selectedTranslations);
         }
-
-        List<String> translations = responseBody.translations()
-                .stream()
-                .map(GoogleTextTranslation::translatedText)
-                .toList();
-        List<String> glossaryTranslations = responseBody.glossaryTranslations() == null
-                ? List.of()
-                : responseBody.glossaryTranslations().stream()
-                .map(GoogleTextTranslation::translatedText)
-                .toList();
-
-        return glossaryTranslations.size() == translations.size() ? glossaryTranslations : translations;
+        return allTranslations;
     }
 
     private List<String> restorePlaceholders(List<PreparedTranslationItem> items, List<String> translatedTexts) {
@@ -744,7 +774,7 @@ public class TranslationService {
     }
 
     private GoogleGlossaryConfig resolveGlossaryConfig() {
-        if (googleGlossaryId == null || googleGlossaryId.isBlank()) {
+        if (!googleGlossaryEnabled || googleGlossaryId == null || googleGlossaryId.isBlank()) {
             return null;
         }
 
@@ -763,6 +793,42 @@ public class TranslationService {
     private void requireGoogleProjectId() {
         if (googleProjectId == null || googleProjectId.isBlank()) {
             throw new IllegalStateException("Google project id is missing. Configure it via environment variable or local.properties");
+        }
+    }
+
+    private void requireValidBatchSize() {
+        if (googleBatchSize <= 0) {
+            throw new IllegalStateException("Google batch size must be greater than zero");
+        }
+    }
+
+    private void validateGlossaryConfiguration() {
+        if (!googleGlossaryEnabled) {
+            return;
+        }
+
+        List<String> missingProperties = new ArrayList<>();
+        if (configuredSourceLanguage == null || configuredSourceLanguage.isBlank()) {
+            missingProperties.add("myapp.google.sourceLanguage");
+        }
+        if (configuredTargetLanguage == null || configuredTargetLanguage.isBlank()) {
+            missingProperties.add("myapp.google.targetLanguage");
+        }
+        if (googleProjectId == null || googleProjectId.isBlank()) {
+            missingProperties.add("myapp.google.projectId");
+        }
+        if (googleLocation == null || googleLocation.isBlank()) {
+            missingProperties.add("myapp.google.location");
+        }
+        if (googleGlossaryId == null || googleGlossaryId.isBlank()) {
+            missingProperties.add("myapp.google.glossaryId");
+        }
+
+        if (!missingProperties.isEmpty()) {
+            throw new IllegalStateException(
+                    "Glossary is enabled but required Google glossary configuration is missing: "
+                            + String.join(", ", missingProperties)
+            );
         }
     }
 
