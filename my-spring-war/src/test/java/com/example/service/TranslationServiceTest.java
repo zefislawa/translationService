@@ -179,4 +179,71 @@ class TranslationServiceTest {
                 }""", Files.readString(tempDir.resolve("en.json")));
     }
 
+    @Test
+    void loadRowsPreservesExactPrefixKeyAndSourceText() throws Exception {
+        TranslationService service = new TranslationService(
+                tempDir.toString(),
+                "dummy-api-key",
+                "dummy-project-id",
+                "global",
+                "",
+                "en",
+                "en",
+                new ObjectMapper(),
+                new RestTemplateBuilder()
+        );
+
+        Files.writeString(tempDir.resolve("en.json"), """
+                {
+                  "prefix one" : {
+                    "key.with.dot" : "Keep  spacing  and \\n newline",
+                    "ExactCaseKey" : "Text With CASE"
+                  }
+                }
+                """);
+
+        List<TranslationRow> rows = service.loadRows(null, "en.json");
+        assertEquals(2, rows.size());
+        assertEquals("prefix one", rows.get(0).getSection());
+        assertEquals("key.with.dot", rows.get(0).getKey());
+        assertEquals("Keep  spacing  and \n newline", rows.get(0).getText());
+        assertEquals("Keep  spacing  and \n newline", rows.get(0).getEnglishReference());
+        assertEquals("ExactCaseKey", rows.get(1).getKey());
+        assertEquals("Text With CASE", rows.get(1).getText());
+    }
+
+    @Test
+    void loadRowsIgnoresNonStringLeafValues() throws Exception {
+        TranslationService service = new TranslationService(
+                tempDir.toString(),
+                "dummy-api-key",
+                "dummy-project-id",
+                "global",
+                "",
+                "en",
+                "en",
+                new ObjectMapper(),
+                new RestTemplateBuilder()
+        );
+
+        Files.writeString(tempDir.resolve("en.json"), """
+                {
+                  "prefix" : {
+                    "valid" : "ok",
+                    "number" : 123,
+                    "nested" : {
+                      "inner" : "value"
+                    },
+                    "nullValue" : null
+                  }
+                }
+                """);
+
+        List<TranslationRow> rows = service.loadRows(null, "en.json");
+        assertEquals(1, rows.size());
+        assertEquals("prefix", rows.get(0).getSection());
+        assertEquals("valid", rows.get(0).getKey());
+        assertEquals("ok", rows.get(0).getText());
+    }
+
 }

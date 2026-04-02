@@ -18,6 +18,8 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.client.BufferingClientHttpRequestFactory;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 import org.springframework.web.util.UriComponentsBuilder;
@@ -41,6 +43,7 @@ import java.util.stream.Stream;
 
 @Service
 public class TranslationService {
+    private static final Logger log = LoggerFactory.getLogger(TranslationService.class);
 
     private final Path defaultDataDir;
     private final ObjectMapper mapper;
@@ -113,27 +116,15 @@ public class TranslationService {
             throw new IllegalArgumentException("Invalid JSON format: expected object at root");
         }
 
-        List<TranslationRow> rows = new ArrayList<>();
+        List<TranslationItem> sourceItems = flattenPrefixTranslationJson(top, file);
         Map<String, Map<String, String>> englishBySection = readSectionMap(englishFile);
-
-        for (Map.Entry<?, ?> sectionEntry : top.entrySet()) {
-            String section = String.valueOf(sectionEntry.getKey());
-            Object sectionVal = sectionEntry.getValue();
-
-            if (!(sectionVal instanceof Map<?, ?> sectionMap)) {
-                continue;
-            }
-
-            for (Map.Entry<?, ?> kv : sectionMap.entrySet()) {
-                String key = String.valueOf(kv.getKey());
-                String text = kv.getValue() == null ? "" : String.valueOf(kv.getValue());
-                String englishReference = englishBySection
-                        .getOrDefault(section, Map.of())
-                        .getOrDefault(key, "");
-                rows.add(new TranslationRow(section, key, text, englishReference));
-            }
+        List<TranslationRow> rows = new ArrayList<>(sourceItems.size());
+        for (TranslationItem item : sourceItems) {
+            String englishReference = englishBySection
+                    .getOrDefault(item.prefix(), Map.of())
+                    .getOrDefault(item.key(), "");
+            rows.add(new TranslationRow(item.prefix(), item.key(), item.sourceText(), englishReference));
         }
-
         return rows;
     }
 
@@ -160,21 +151,39 @@ public class TranslationService {
             return Map.of();
         }
 
+        List<TranslationItem> items = flattenPrefixTranslationJson(top, file);
         Map<String, Map<String, String>> result = new LinkedHashMap<>();
-        for (Map.Entry<?, ?> sectionEntry : top.entrySet()) {
-            String section = String.valueOf(sectionEntry.getKey());
-            Object sectionVal = sectionEntry.getValue();
-            if (!(sectionVal instanceof Map<?, ?> sectionMap)) {
+        for (TranslationItem item : items) {
+            result.computeIfAbsent(item.prefix(), ignored -> new LinkedHashMap<>())
+                    .put(item.key(), item.sourceText());
+        }
+        return result;
+    }
+
+    private List<TranslationItem> flattenPrefixTranslationJson(Map<?, ?> top, Path sourceFile) {
+        List<TranslationItem> items = new ArrayList<>();
+        int index = 0;
+        for (Map.Entry<?, ?> prefixEntry : top.entrySet()) {
+            String prefix = String.valueOf(prefixEntry.getKey());
+            Object keyValues = prefixEntry.getValue();
+            if (!(keyValues instanceof Map<?, ?> nestedMap)) {
+                log.warn("Ignoring non-object prefix value while reading {} at prefix '{}': {}",
+                        sourceFile.getFileName(), prefix, keyValues == null ? "null" : keyValues.getClass().getSimpleName());
                 continue;
             }
 
-            Map<String, String> values = new LinkedHashMap<>();
-            for (Map.Entry<?, ?> kv : sectionMap.entrySet()) {
-                values.put(String.valueOf(kv.getKey()), kv.getValue() == null ? "" : String.valueOf(kv.getValue()));
+            for (Map.Entry<?, ?> keyEntry : nestedMap.entrySet()) {
+                String key = String.valueOf(keyEntry.getKey());
+                Object sourceText = keyEntry.getValue();
+                if (!(sourceText instanceof String text)) {
+                    log.warn("Ignoring non-string translation value while reading {} at '{}.{}': {}",
+                            sourceFile.getFileName(), prefix, key, sourceText == null ? "null" : sourceText.getClass().getSimpleName());
+                    continue;
+                }
+                items.add(new TranslationItem(index++, prefix, key, prefix + "." + key, text));
             }
-            result.put(section, values);
         }
-        return result;
+        return items;
     }
 
     public TranslationExportResult translateAndStore(String customPath, String fileName, String targetLanguage, List<TranslationRow> rows) throws Exception {
@@ -418,7 +427,9 @@ public class TranslationService {
         List<TranslationItem> items = new ArrayList<>(rows.size());
         for (int i = 0; i < rows.size(); i++) {
             TranslationRow row = rows.get(i);
-            items.add(new TranslationItem(i, row.getSection(), row.getKey(), Objects.requireNonNullElse(row.getText(), "")));
+            String prefix = row.getSection();
+            String key = row.getKey();
+            items.add(new TranslationItem(i, prefix, key, prefix + "." + key, Objects.requireNonNullElse(row.getText(), "")));
         }
         return items;
     }
@@ -427,8 +438,8 @@ public class TranslationService {
         return items.stream()
                 .map(item -> new PreparedTranslationItem(
                         item,
-                        item.text().replace("\r\n", "\n"),
-                        item.text().replace("\r\n", "\n"),
+                        item.sourceText().replace("\r\n", "\n"),
+                        item.sourceText().replace("\r\n", "\n"),
                         Map.of(),
                         false,
                         ""
@@ -556,10 +567,10 @@ public class TranslationService {
             }
 
             if (!missingTokens.isEmpty()) {
-                issues.add(item.item().section() + "." + item.item().key() + ": missing placeholder tokens " + missingTokens);
+                issues.add(item.item().fullKey() + ": missing placeholder tokens " + missingTokens);
             }
             if (restored.isBlank() && !item.normalizedText().isBlank()) {
-                issues.add(item.item().section() + "." + item.item().key() + ": translated result became blank");
+                issues.add(item.item().fullKey() + ": translated result became blank");
             }
         }
         return new ValidationReport(items.size(), issues.size(), issues);
@@ -684,7 +695,7 @@ public class TranslationService {
         }
     }
 
-    private record TranslationItem(int index, String section, String key, String text) {
+    private record TranslationItem(int index, String prefix, String key, String fullKey, String sourceText) {
     }
 
     private record PreparedTranslationItem(
