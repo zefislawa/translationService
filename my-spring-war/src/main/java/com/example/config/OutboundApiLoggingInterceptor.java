@@ -32,16 +32,24 @@ public class OutboundApiLoggingInterceptor implements ClientHttpRequestIntercept
                 prettifyAndTruncateBody(body));
 
         ClientHttpResponse response = execution.execute(request, body);
-        byte[] responseBodyBytes = response.getBody().readAllBytes();
+        try {
+            byte[] responseBodyBytes = response.getBody().readAllBytes();
 
-        log.info("Outbound API response <- method={}, uri={}, status={}, headers={}, body={}",
-                request.getMethod(),
-                request.getURI(),
-                response.getStatusCode(),
-                response.getHeaders(),
-                prettifyAndTruncateBody(responseBodyBytes));
+            log.info("Outbound API response <- method={}, uri={}, status={}, headers={}, body={}",
+                    request.getMethod(),
+                    request.getURI(),
+                    response.getStatusCode(),
+                    response.getHeaders(),
+                    prettifyAndTruncateBody(responseBodyBytes));
 
-        return new CachedBodyClientHttpResponse(response, responseBodyBytes);
+            return new CachedBodyClientHttpResponse(response, responseBodyBytes);
+        } catch (IOException ex) {
+            log.warn("Outbound API response logging skipped -> method={}, uri={}, reason={}",
+                    request.getMethod(),
+                    request.getURI(),
+                    ex.getMessage());
+            return response;
+        }
     }
 
     private String prettifyAndTruncateBody(byte[] body) {
