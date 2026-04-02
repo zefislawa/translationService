@@ -62,6 +62,7 @@ public class TranslationService {
             "\\{\\{[^{}]+}}|\\{[^{}]+}|%\\d*\\$?[sdfoxegc]|<[^>]+>"
     );
     private static final String PLACEHOLDER_TOKEN_PREFIX = "__PH_";
+    private static final Pattern PROTECTED_PLACEHOLDER_TOKEN_PATTERN = Pattern.compile("__PH_[A-Z0-9_]+__");
     private static final Set<String> UI_FOCUSED_PREFIXES = Set.of("b", "m", "l");
     private static final Set<String> DEFAULT_AMBIGUOUS_TERMS = Set.of(
             "close", "clear", "apply", "lead", "charge", "rate", "run", "view", "basket", "shopping cart"
@@ -474,11 +475,15 @@ public class TranslationService {
         for (PreparedTranslationItem item : items) {
             Matcher matcher = PLACEHOLDER_PATTERN.matcher(item.normalizedText());
             Map<String, String> placeholderMap = new LinkedHashMap<>();
+            Map<String, String> placeholderToToken = new LinkedHashMap<>();
             StringBuffer protectedBuffer = new StringBuffer();
-            int placeholderCounter = 0;
             while (matcher.find()) {
-                String token = PLACEHOLDER_TOKEN_PREFIX + placeholderCounter++ + "__";
-                placeholderMap.put(token, matcher.group());
+                String placeholder = matcher.group();
+                String token = placeholderToToken.computeIfAbsent(
+                        placeholder,
+                        key -> buildProtectedPlaceholderToken(key, item.normalizedText(), placeholderMap.keySet())
+                );
+                placeholderMap.putIfAbsent(token, placeholder);
                 matcher.appendReplacement(protectedBuffer, Matcher.quoteReplacement(token));
             }
             matcher.appendTail(protectedBuffer);
@@ -558,6 +563,32 @@ public class TranslationService {
         return restored;
     }
 
+    private String buildProtectedPlaceholderToken(String placeholder, String sourceText, Set<String> existingTokens) {
+        String innerValue = placeholder;
+        if (placeholder.startsWith("{{") && placeholder.endsWith("}}")) {
+            innerValue = placeholder.substring(2, placeholder.length() - 2);
+        } else if (placeholder.startsWith("{") && placeholder.endsWith("}")) {
+            innerValue = placeholder.substring(1, placeholder.length() - 1);
+        }
+
+        String normalizedInnerValue = innerValue.toUpperCase(Locale.ROOT)
+                .replaceAll("[^A-Z0-9]+", "_")
+                .replaceAll("^_+", "")
+                .replaceAll("_+$", "");
+
+        if (normalizedInnerValue.isBlank()) {
+            normalizedInnerValue = "TOKEN";
+        }
+
+        String baseToken = PLACEHOLDER_TOKEN_PREFIX + normalizedInnerValue + "__";
+        String token = baseToken;
+        int suffix = 2;
+        while (existingTokens.contains(token) || sourceText.contains(token)) {
+            token = PLACEHOLDER_TOKEN_PREFIX + normalizedInnerValue + "_" + suffix++ + "__";
+        }
+        return token;
+    }
+
     private ValidationReport validateResults(
             List<PreparedTranslationItem> items,
             List<String> translatedProtectedTexts,
@@ -582,6 +613,10 @@ public class TranslationService {
             }
             if (restored.isBlank() && !item.normalizedText().isBlank()) {
                 issues.add(item.item().fullKey() + ": translated result became blank");
+            }
+            Matcher unresolvedTokenMatcher = PROTECTED_PLACEHOLDER_TOKEN_PATTERN.matcher(restored);
+            if (unresolvedTokenMatcher.find()) {
+                issues.add(item.item().fullKey() + ": unresolved placeholder tokens remained after restoration");
             }
 
             PreprocessingMetadata metadata = item.metadata();
