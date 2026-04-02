@@ -286,7 +286,6 @@ class TranslationServiceTest {
     }
 
     @Test
-    @SuppressWarnings("unchecked")
     void validateResultsMarksItemInvalidWhenProtectedTokensRemainAfterRestoration() throws Exception {
         TranslationService service = createService("", false, "en", "bg", 50);
 
@@ -385,7 +384,6 @@ class TranslationServiceTest {
     }
 
     @Test
-    @SuppressWarnings("unchecked")
     void flattenAndRebuildPreservesOriginalJsonStructure() throws Exception {
         TranslationService service = createService("", false, "en", "bg", 50);
         ObjectMapper objectMapper = new ObjectMapper();
@@ -407,7 +405,6 @@ class TranslationServiceTest {
     }
 
     @Test
-    @SuppressWarnings("unchecked")
     void riskyStringClassificationMarksShortUiAndConfiguredRiskTerms() throws Exception {
         Path riskyTermsFile = tempDir.resolve("risky-terms.txt");
         Files.writeString(riskyTermsFile, "sync now\n");
@@ -433,7 +430,6 @@ class TranslationServiceTest {
     }
 
     @Test
-    @SuppressWarnings("unchecked")
     void validationDetectsMissingPlaceholderTokens() throws Exception {
         TranslationService service = createService("", false, "en", "bg", 50);
         TranslationRow row = new TranslationRow("b", "name", "Hello {{name}}", "");
@@ -466,7 +462,6 @@ class TranslationServiceTest {
     }
 
     @Test
-    @SuppressWarnings("unchecked")
     void duplicateSourceConsistencyAddsWarnings() throws Exception {
         TranslationService service = createService("", false, "en", "bg", 50);
         Method flattenRows = TranslationService.class.getDeclaredMethod("flattenRows", List.class);

@@ -146,7 +146,6 @@ public class TranslationService {
         }
     }
 
-    @SuppressWarnings("unchecked")
     public List<TranslationRow> loadRows(String customPath, String fileName) throws Exception {
         Path file = resolveJsonFile(customPath, fileName);
         if (!Files.exists(file)) {
@@ -186,7 +185,6 @@ public class TranslationService {
                 : trimmedValue + ".json";
     }
 
-    @SuppressWarnings("unchecked")
     private Map<String, Map<String, String>> readSectionMap(Path file) throws Exception {
         if (!Files.exists(file)) {
             return Map.of();
@@ -264,7 +262,6 @@ public class TranslationService {
         return new TranslationExportResult(outputFile.toAbsolutePath().toString(), targetLanguage, translatedTexts.size());
     }
 
-    @SuppressWarnings("unchecked")
     private Object rebuildTranslatedPayload(Object sourcePayload, Map<String, String> translatedByFullKey) {
         if (!(sourcePayload instanceof Map<?, ?> sourceTopLevel)) {
             throw new IllegalArgumentException("Invalid source JSON format: expected object at root");
