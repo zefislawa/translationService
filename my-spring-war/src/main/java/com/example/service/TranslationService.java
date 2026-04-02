@@ -18,6 +18,8 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.client.BufferingClientHttpRequestFactory;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
+import org.springframework.web.client.HttpStatusCodeException;
+import org.springframework.web.client.ResourceAccessException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -27,6 +29,7 @@ import org.springframework.web.util.UriComponentsBuilder;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.concurrent.TimeUnit;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
@@ -60,6 +63,8 @@ public class TranslationService {
     private final boolean googleGlossaryEnabled;
     private final String googleGlossaryId;
     private final int googleBatchSize;
+    private final int googleRetryAttempts;
+    private final long googleRetryBackoffMs;
     private final String supportedLanguagesDisplayLocale;
     private final String referenceLanguageFile;
     private final String riskyTermsFile;
@@ -84,6 +89,8 @@ public class TranslationService {
             @Value("${myapp.google.glossaryEnabled:false}") boolean googleGlossaryEnabled,
             @Value("${myapp.google.glossaryId:}") String googleGlossaryId,
             @Value("${myapp.google.batchSize:50}") int googleBatchSize,
+            @Value("${myapp.google.retryAttempts:3}") int googleRetryAttempts,
+            @Value("${myapp.google.retryBackoffMs:500}") long googleRetryBackoffMs,
             @Value("${myapp.google.supportedLanguagesDisplayLocale:en}") String supportedLanguagesDisplayLocale,
             @Value("${myapp.referenceLanguageFile:en}") String referenceLanguageFile,
             @Value("${myapp.riskyTermsFile:risky-terms.txt}") String riskyTermsFile,
@@ -100,10 +107,13 @@ public class TranslationService {
         this.googleGlossaryEnabled = googleGlossaryEnabled;
         this.googleGlossaryId = googleGlossaryId;
         this.googleBatchSize = googleBatchSize;
+        this.googleRetryAttempts = googleRetryAttempts;
+        this.googleRetryBackoffMs = googleRetryBackoffMs;
         this.supportedLanguagesDisplayLocale = supportedLanguagesDisplayLocale;
         this.referenceLanguageFile = referenceLanguageFile;
         this.riskyTermsFile = riskyTermsFile;
         requireValidBatchSize();
+        requireValidRetrySettings();
         validateGlossaryConfiguration();
         this.mapper = mapper;
         this.restTemplate = restTemplateBuilder
@@ -439,7 +449,7 @@ public class TranslationService {
         List<PreparedTranslationItem> protectedItems = protectPlaceholders(preprocessedItems);
         List<String> translatedProtectedTexts = sourceLanguage.equalsIgnoreCase(targetLanguage)
                 ? protectedItems.stream().map(PreparedTranslationItem::protectedText).toList()
-                : callGoogleTranslationLlm(sourceLanguage, targetLanguage, protectedItems);
+                : translateByRouteV1(protectedItems);
 
         if (translatedProtectedTexts.size() != protectedItems.size()) {
             throw new IllegalStateException("Google Translation API returned an unexpected number of translated strings");
@@ -533,7 +543,8 @@ public class TranslationService {
         List<String> allTranslations = new ArrayList<>(items.size());
         for (int start = 0; start < items.size(); start += googleBatchSize) {
             int end = Math.min(start + googleBatchSize, items.size());
-            List<String> contents = items.subList(start, end).stream()
+            List<PreparedTranslationItem> batchItems = items.subList(start, end);
+            List<String> contents = batchItems.stream()
                     .map(PreparedTranslationItem::protectedText)
                     .toList();
             GoogleTranslateTextRequest body = new GoogleTranslateTextRequest(
@@ -548,10 +559,15 @@ public class TranslationService {
             HttpHeaders headers = new HttpHeaders();
             headers.setContentType(MediaType.APPLICATION_JSON);
 
-            ResponseEntity<GoogleTranslateTextResponse> response = restTemplate.postForEntity(
+            log.info("Sending translation batch start={}, endExclusive={}, batchSize={}, source={}, target={}, model={}, glossaryEnabled={}",
+                    start, end, batchItems.size(), sourceLanguage, targetLanguage, googleTranslationModel, googleGlossaryEnabled);
+
+            ResponseEntity<GoogleTranslateTextResponse> response = executeTranslateBatchWithRetry(
                     url,
-                    new HttpEntity<>(body, headers),
-                    GoogleTranslateTextResponse.class
+                    body,
+                    headers,
+                    start,
+                    end
             );
 
             GoogleTranslateTextResponse responseBody = response.getBody();
@@ -578,6 +594,99 @@ public class TranslationService {
             allTranslations.addAll(selectedTranslations);
         }
         return allTranslations;
+    }
+
+    private List<String> translateByRouteV1(List<PreparedTranslationItem> items) {
+        String sourceLanguage = "en";
+        String targetLanguage = "bg";
+        List<String> translatedTexts = callGoogleTranslationLlm(sourceLanguage, targetLanguage, items);
+        if (translatedTexts.size() != items.size()) {
+            throw new IllegalStateException("Translation route v1 returned an unexpected number of translated strings");
+        }
+
+        List<TranslatedItemResult> perItemResults = new ArrayList<>(items.size());
+        for (int i = 0; i < items.size(); i++) {
+            PreparedTranslationItem item = items.get(i);
+            perItemResults.add(new TranslatedItemResult(
+                    item.item().index(),
+                    item.item().fullKey(),
+                    translatedTexts.get(i),
+                    "google-translation-advanced/translateText/translation-llm",
+                    item.metadata().risky(),
+                    item.metadata().riskReason()
+            ));
+        }
+        return perItemResults.stream()
+                .sorted(Comparator.comparingInt(TranslatedItemResult::index))
+                .map(TranslatedItemResult::translatedText)
+                .toList();
+    }
+
+    private ResponseEntity<GoogleTranslateTextResponse> executeTranslateBatchWithRetry(
+            String url,
+            GoogleTranslateTextRequest body,
+            HttpHeaders headers,
+            int start,
+            int end
+    ) {
+        int attempt = 1;
+        while (true) {
+            try {
+                return restTemplate.postForEntity(
+                        url,
+                        new HttpEntity<>(body, headers),
+                        GoogleTranslateTextResponse.class
+                );
+            } catch (ResourceAccessException | HttpStatusCodeException ex) {
+                boolean transientFailure = isTransientFailure(ex);
+                if (!transientFailure || attempt >= googleRetryAttempts) {
+                    String statusCode = ex instanceof HttpStatusCodeException statusException
+                            ? String.valueOf(statusException.getStatusCode().value())
+                            : "n/a";
+                    log.error("Translation batch failed after attempt={} for range=[{}, {}) status={} message={}",
+                            attempt, start, end, statusCode, sanitizeErrorMessage(ex.getMessage()));
+                    throw ex;
+                }
+                long delayMs = googleRetryBackoffMs * (1L << (attempt - 1));
+                log.warn("Transient translation failure attempt={} for range=[{}, {}) statusOrType={}, retryInMs={}",
+                        attempt,
+                        start,
+                        end,
+                        ex instanceof HttpStatusCodeException statusException
+                                ? statusException.getStatusCode().value()
+                                : ex.getClass().getSimpleName(),
+                        delayMs);
+                sleepQuietly(delayMs);
+                attempt++;
+            }
+        }
+    }
+
+    private boolean isTransientFailure(Exception ex) {
+        if (ex instanceof ResourceAccessException) {
+            return true;
+        }
+        if (ex instanceof HttpStatusCodeException statusException) {
+            int code = statusException.getStatusCode().value();
+            return code == 429 || (code >= 500 && code < 600);
+        }
+        return false;
+    }
+
+    private String sanitizeErrorMessage(String message) {
+        if (message == null || message.isBlank()) {
+            return "n/a";
+        }
+        return message.length() > 300 ? message.substring(0, 300) + "..." : message;
+    }
+
+    private void sleepQuietly(long delayMs) {
+        try {
+            TimeUnit.MILLISECONDS.sleep(delayMs);
+        } catch (InterruptedException interruptedException) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("Interrupted while waiting to retry Google Translate request", interruptedException);
+        }
     }
 
     private List<String> restorePlaceholders(List<PreparedTranslationItem> items, List<String> translatedTexts) {
@@ -802,6 +911,15 @@ public class TranslationService {
         }
     }
 
+    private void requireValidRetrySettings() {
+        if (googleRetryAttempts <= 0) {
+            throw new IllegalStateException("Google retry attempts must be greater than zero");
+        }
+        if (googleRetryBackoffMs < 0) {
+            throw new IllegalStateException("Google retry backoff must be zero or greater");
+        }
+    }
+
     private void validateGlossaryConfiguration() {
         if (!googleGlossaryEnabled) {
             return;
@@ -966,5 +1084,15 @@ public class TranslationService {
     }
 
     private record TranslationPipelineResult(List<String> translatedTexts, ValidationReport validationReport) {
+    }
+
+    private record TranslatedItemResult(
+            int index,
+            String fullKey,
+            String translatedText,
+            String route,
+            boolean risky,
+            String riskReason
+    ) {
     }
 }
