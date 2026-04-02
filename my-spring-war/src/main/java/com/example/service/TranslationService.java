@@ -28,9 +28,12 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Comparator;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -54,10 +57,15 @@ public class TranslationService {
     private final String googleGlossaryId;
     private final String supportedLanguagesDisplayLocale;
     private final String referenceLanguageFile;
+    private final String riskyTermsFile;
     private static final Pattern PLACEHOLDER_PATTERN = Pattern.compile(
             "\\{\\{[^{}]+}}|\\{[^{}]+}|%\\d*\\$?[sdfoxegc]|<[^>]+>"
     );
     private static final String PLACEHOLDER_TOKEN_PREFIX = "__PH_";
+    private static final Set<String> UI_FOCUSED_PREFIXES = Set.of("b", "m", "l");
+    private static final Set<String> DEFAULT_AMBIGUOUS_TERMS = Set.of(
+            "close", "clear", "apply", "lead", "charge", "rate", "run", "view", "basket", "shopping cart"
+    );
 
     public TranslationService(
             @Value("${myapp.dataDir}") String defaultDataDir,
@@ -67,6 +75,7 @@ public class TranslationService {
             @Value("${myapp.google.glossaryId:}") String googleGlossaryId,
             @Value("${myapp.google.supportedLanguagesDisplayLocale:en}") String supportedLanguagesDisplayLocale,
             @Value("${myapp.referenceLanguageFile:en}") String referenceLanguageFile,
+            @Value("${myapp.riskyTermsFile:risky-terms.txt}") String riskyTermsFile,
             ObjectMapper mapper,
             RestTemplateBuilder restTemplateBuilder
     ) throws Exception {
@@ -77,6 +86,7 @@ public class TranslationService {
         this.googleGlossaryId = googleGlossaryId;
         this.supportedLanguagesDisplayLocale = supportedLanguagesDisplayLocale;
         this.referenceLanguageFile = referenceLanguageFile;
+        this.riskyTermsFile = riskyTermsFile;
         this.mapper = mapper;
         this.restTemplate = restTemplateBuilder
                 .setConnectTimeout(Duration.ofSeconds(15))
@@ -195,7 +205,7 @@ public class TranslationService {
         }
 
         String sourceLanguage = resolveSourceLanguage(fileName);
-        TranslationPipelineResult pipelineResult = runTranslationPipeline(rows, sourceLanguage, targetLanguage);
+        TranslationPipelineResult pipelineResult = runTranslationPipeline(customPath, rows, sourceLanguage, targetLanguage);
         List<String> translatedTexts = pipelineResult.translatedTexts();
 
         if (translatedTexts.size() != rows.size()) {
@@ -230,7 +240,7 @@ public class TranslationService {
 
         String sourceLanguage = extractLanguageFromFileName(sourceFileName);
         String targetLanguage = extractLanguageFromFileName(targetFileName);
-        TranslationPipelineResult pipelineResult = runTranslationPipeline(rows, sourceLanguage, targetLanguage);
+        TranslationPipelineResult pipelineResult = runTranslationPipeline(customPath, rows, sourceLanguage, targetLanguage);
         List<String> translatedTexts = pipelineResult.translatedTexts();
 
         if (translatedTexts.size() != rows.size()) {
@@ -404,22 +414,21 @@ public class TranslationService {
                 .toList();
     }
 
-    private TranslationPipelineResult runTranslationPipeline(List<TranslationRow> rows, String sourceLanguage, String targetLanguage) {
+    private TranslationPipelineResult runTranslationPipeline(String customPath, List<TranslationRow> rows, String sourceLanguage, String targetLanguage) {
         List<TranslationItem> flattenedItems = flattenRows(rows);
-        List<PreparedTranslationItem> preprocessedItems = preprocessItems(flattenedItems);
+        Set<String> configuredRiskyTerms = loadConfiguredRiskyTerms(customPath);
+        List<PreparedTranslationItem> preprocessedItems = preprocessItems(flattenedItems, configuredRiskyTerms);
         List<PreparedTranslationItem> protectedItems = protectPlaceholders(preprocessedItems);
-        List<PreparedTranslationItem> classifiedItems = classifyRiskyItems(protectedItems);
-
         List<String> translatedProtectedTexts = sourceLanguage.equalsIgnoreCase(targetLanguage)
-                ? classifiedItems.stream().map(PreparedTranslationItem::protectedText).toList()
-                : callGoogleTranslationLlm(sourceLanguage, targetLanguage, classifiedItems);
+                ? protectedItems.stream().map(PreparedTranslationItem::protectedText).toList()
+                : callGoogleTranslationLlm(sourceLanguage, targetLanguage, protectedItems);
 
-        if (translatedProtectedTexts.size() != classifiedItems.size()) {
+        if (translatedProtectedTexts.size() != protectedItems.size()) {
             throw new IllegalStateException("Google Translation API returned an unexpected number of translated strings");
         }
 
-        List<String> restoredTexts = restorePlaceholders(classifiedItems, translatedProtectedTexts);
-        ValidationReport validationReport = validateResults(classifiedItems, translatedProtectedTexts, restoredTexts);
+        List<String> restoredTexts = restorePlaceholders(protectedItems, translatedProtectedTexts);
+        ValidationReport validationReport = validateResults(protectedItems, translatedProtectedTexts, restoredTexts);
         return new TranslationPipelineResult(restoredTexts, validationReport);
     }
 
@@ -434,16 +443,29 @@ public class TranslationService {
         return items;
     }
 
-    private List<PreparedTranslationItem> preprocessItems(List<TranslationItem> items) {
+    private List<PreparedTranslationItem> preprocessItems(List<TranslationItem> items, Set<String> configuredRiskyTerms) {
         return items.stream()
-                .map(item -> new PreparedTranslationItem(
-                        item,
-                        item.sourceText().replace("\r\n", "\n"),
-                        item.sourceText().replace("\r\n", "\n"),
-                        Map.of(),
-                        false,
-                        ""
-                ))
+                .map(item -> {
+                    String normalizedText = item.sourceText().replace("\r\n", "\n");
+                    List<String> placeholders = extractPlaceholders(normalizedText);
+                    int wordCount = countWords(normalizedText);
+                    boolean isShortText = wordCount <= 3;
+                    boolean isRiskyPrefix = isShortText && UI_FOCUSED_PREFIXES.contains(normalizePrefix(item.prefix()));
+                    boolean hasAmbiguousTerm = containsAmbiguousTerm(normalizedText);
+                    boolean hasConfiguredRiskyTerm = containsConfiguredRiskyTerm(normalizedText, configuredRiskyTerms);
+                    boolean risky = isRiskyPrefix || hasAmbiguousTerm || hasConfiguredRiskyTerm;
+                    String riskReason = buildRiskReason(isRiskyPrefix, hasAmbiguousTerm, hasConfiguredRiskyTerm);
+
+                    PreprocessingMetadata metadata = new PreprocessingMetadata(
+                            wordCount,
+                            isShortText,
+                            !placeholders.isEmpty(),
+                            placeholders,
+                            risky,
+                            riskReason
+                    );
+                    return new PreparedTranslationItem(item, normalizedText, normalizedText, Map.of(), metadata);
+                })
                 .toList();
     }
 
@@ -465,22 +487,10 @@ public class TranslationService {
                     item.normalizedText(),
                     protectedBuffer.toString(),
                     placeholderMap,
-                    item.risky(),
-                    item.riskReason()
+                    item.metadata()
             ));
         }
         return result;
-    }
-
-    private List<PreparedTranslationItem> classifyRiskyItems(List<PreparedTranslationItem> items) {
-        return items.stream()
-                .map(item -> {
-                    String text = item.protectedText();
-                    boolean isRisky = text.isBlank() || text.matches("^[\\d\\s\\p{Punct}]+$");
-                    String riskReason = isRisky ? "blank-or-non-linguistic" : "";
-                    return new PreparedTranslationItem(item.item(), item.normalizedText(), item.protectedText(), item.placeholders(), isRisky, riskReason);
-                })
-                .toList();
     }
 
     private List<String> callGoogleTranslationLlm(
@@ -554,6 +564,7 @@ public class TranslationService {
             List<String> restoredTexts
     ) {
         List<String> issues = new ArrayList<>();
+        List<PreprocessingReportItem> preprocessingItems = new ArrayList<>();
         for (int i = 0; i < items.size(); i++) {
             PreparedTranslationItem item = items.get(i);
             String translatedProtected = translatedProtectedTexts.get(i);
@@ -572,8 +583,123 @@ public class TranslationService {
             if (restored.isBlank() && !item.normalizedText().isBlank()) {
                 issues.add(item.item().fullKey() + ": translated result became blank");
             }
+
+            PreprocessingMetadata metadata = item.metadata();
+            preprocessingItems.add(new PreprocessingReportItem(
+                    item.item().fullKey(),
+                    item.item().prefix(),
+                    item.item().key(),
+                    metadata.wordCount(),
+                    metadata.shortText(),
+                    metadata.containsPlaceholders(),
+                    metadata.placeholders(),
+                    metadata.risky(),
+                    metadata.riskReason()
+            ));
         }
-        return new ValidationReport(items.size(), issues.size(), issues);
+        return new ValidationReport(items.size(), issues.size(), issues, preprocessingItems);
+    }
+
+    private int countWords(String text) {
+        String trimmed = text == null ? "" : text.trim();
+        if (trimmed.isEmpty()) {
+            return 0;
+        }
+        return (int) Arrays.stream(trimmed.split("\\s+"))
+                .filter(token -> !token.isBlank())
+                .count();
+    }
+
+    private List<String> extractPlaceholders(String text) {
+        if (text == null || text.isEmpty()) {
+            return List.of();
+        }
+        Matcher matcher = PLACEHOLDER_PATTERN.matcher(text);
+        Set<String> placeholders = new LinkedHashSet<>();
+        while (matcher.find()) {
+            placeholders.add(matcher.group());
+        }
+        return List.copyOf(placeholders);
+    }
+
+    private boolean containsAmbiguousTerm(String text) {
+        String normalizedText = normalizeForTermCheck(text);
+        for (String term : DEFAULT_AMBIGUOUS_TERMS) {
+            if (normalizedText.contains(normalizeForTermCheck(term))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean containsConfiguredRiskyTerm(String text, Set<String> configuredRiskyTerms) {
+        if (configuredRiskyTerms.isEmpty()) {
+            return false;
+        }
+        String normalizedText = normalizeForTermCheck(text);
+        for (String term : configuredRiskyTerms) {
+            if (normalizedText.contains(term)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private String normalizeForTermCheck(String text) {
+        return text == null
+                ? ""
+                : text.toLowerCase(Locale.ROOT).replaceAll("\\s+", " ").trim();
+    }
+
+    private String normalizePrefix(String prefix) {
+        return prefix == null ? "" : prefix.trim().toLowerCase(Locale.ROOT);
+    }
+
+    private String buildRiskReason(boolean riskyPrefix, boolean ambiguousTerm, boolean configuredTerm) {
+        List<String> reasons = new ArrayList<>();
+        if (riskyPrefix) {
+            reasons.add("short-ui-prefix");
+        }
+        if (ambiguousTerm) {
+            reasons.add("ambiguous-term");
+        }
+        if (configuredTerm) {
+            reasons.add("configured-risky-term");
+        }
+        return String.join(",", reasons);
+    }
+
+    private Set<String> loadConfiguredRiskyTerms(String customPath) {
+        if (riskyTermsFile == null || riskyTermsFile.isBlank()) {
+            return Set.of();
+        }
+
+        Path riskyTermsPath = Path.of(riskyTermsFile);
+        if (!riskyTermsPath.isAbsolute()) {
+            try {
+                riskyTermsPath = resolveDataDir(customPath).resolve(riskyTermsPath).normalize();
+            } catch (Exception e) {
+                log.warn("Failed to resolve risky terms file path '{}': {}", riskyTermsFile, e.getMessage());
+                return Set.of();
+            }
+        }
+
+        if (!Files.exists(riskyTermsPath)) {
+            return Set.of();
+        }
+
+        try (Stream<String> lines = Files.lines(riskyTermsPath)) {
+            Set<String> terms = lines
+                    .map(String::trim)
+                    .filter(line -> !line.isEmpty())
+                    .filter(line -> !line.startsWith("#"))
+                    .map(this::normalizeForTermCheck)
+                    .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
+            return Collections.unmodifiableSet(terms);
+        } catch (Exception e) {
+            log.warn("Failed to load risky terms from {}: {}", riskyTermsPath, e.getMessage());
+            return Set.of();
+        }
     }
 
     private void writeValidationReport(Path outputFile, ValidationReport report) throws Exception {
@@ -703,12 +829,39 @@ public class TranslationService {
             String normalizedText,
             String protectedText,
             Map<String, String> placeholders,
+            PreprocessingMetadata metadata
+    ) {
+    }
+
+    private record PreprocessingMetadata(
+            int wordCount,
+            boolean shortText,
+            boolean containsPlaceholders,
+            List<String> placeholders,
             boolean risky,
             String riskReason
     ) {
     }
 
-    private record ValidationReport(int totalItems, int issueCount, List<String> issues) {
+    private record PreprocessingReportItem(
+            String fullKey,
+            String prefix,
+            String key,
+            int wordCount,
+            boolean shortText,
+            boolean containsPlaceholders,
+            List<String> placeholders,
+            boolean risky,
+            String riskReason
+    ) {
+    }
+
+    private record ValidationReport(
+            int totalItems,
+            int issueCount,
+            List<String> issues,
+            List<PreprocessingReportItem> preprocessing
+    ) {
     }
 
     private record TranslationPipelineResult(List<String> translatedTexts, ValidationReport validationReport) {

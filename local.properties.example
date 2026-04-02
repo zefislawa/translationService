@@ -29,3 +29,7 @@ myapp.local.uiPreferredTargetLanguage=fr
 # Reference language used to populate the "Reference" column.
 # Example values: en, fr
 myapp.local.referenceLanguageFile=en
+
+# Optional path to a newline-delimited list of additional risky terms.
+# Relative paths are resolved from the configured data directory.
+myapp.local.riskyTermsFile=risky-terms.txt
