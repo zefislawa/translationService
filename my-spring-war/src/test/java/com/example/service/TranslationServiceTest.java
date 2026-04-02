@@ -18,6 +18,7 @@ import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class TranslationServiceTest {
@@ -27,18 +28,7 @@ class TranslationServiceTest {
 
     @Test
     void saveRowsAppendsNewKeysToEndOfExistingSection() throws Exception {
-        TranslationService service = new TranslationService(
-                tempDir.toString(),
-                "dummy-api-key",
-                "dummy-project-id",
-                "global",
-                "",
-                "en",
-                "en",
-                "",
-                new ObjectMapper(),
-                new RestTemplateBuilder()
-        );
+        TranslationService service = createService("", false, "en", "bg", 50);
 
         Path targetFile = tempDir.resolve("fr.json");
         Files.writeString(targetFile, """
@@ -77,18 +67,7 @@ class TranslationServiceTest {
     }
     @Test
     void compareFilesReturnsDifferencesForMissingAndChangedKeys() throws Exception {
-        TranslationService service = new TranslationService(
-                tempDir.toString(),
-                "dummy-api-key",
-                "dummy-project-id",
-                "global",
-                "",
-                "en",
-                "en",
-                "",
-                new ObjectMapper(),
-                new RestTemplateBuilder()
-        );
+        TranslationService service = createService("", false, "en", "bg", 50);
 
         Files.writeString(tempDir.resolve("fr.json"), """
                 {
@@ -119,18 +98,7 @@ class TranslationServiceTest {
 
     @Test
     void translateAndImportMergesRowsIntoTargetFileWhenLanguagesMatch() throws Exception {
-        TranslationService service = new TranslationService(
-                tempDir.toString(),
-                "dummy-api-key",
-                "dummy-project-id",
-                "global",
-                "",
-                "en",
-                "en",
-                "",
-                new ObjectMapper(),
-                new RestTemplateBuilder()
-        );
+        TranslationService service = createService("", false, "en", "bg", 50);
 
         Path targetFile = tempDir.resolve("de.json");
         Files.writeString(targetFile, """
@@ -160,18 +128,7 @@ class TranslationServiceTest {
 
     @Test
     void translateAndStoreFallsBackToReferenceLanguageWhenFileNameIsNotLanguageCode() throws Exception {
-        TranslationService service = new TranslationService(
-                tempDir.toString(),
-                "dummy-api-key",
-                "dummy-project-id",
-                "global",
-                "",
-                "en",
-                "en",
-                "",
-                new ObjectMapper(),
-                new RestTemplateBuilder()
-        );
+        TranslationService service = createService("", false, "en", "bg", 50);
 
         List<TranslationRow> rows = List.of(
                 new TranslationRow("b", "Apply", "Apply", "")
@@ -191,18 +148,7 @@ class TranslationServiceTest {
 
     @Test
     void loadRowsPreservesExactPrefixKeyAndSourceText() throws Exception {
-        TranslationService service = new TranslationService(
-                tempDir.toString(),
-                "dummy-api-key",
-                "dummy-project-id",
-                "global",
-                "",
-                "en",
-                "en",
-                "",
-                new ObjectMapper(),
-                new RestTemplateBuilder()
-        );
+        TranslationService service = createService("", false, "en", "bg", 50);
 
         Files.writeString(tempDir.resolve("en.json"), """
                 {
@@ -225,18 +171,7 @@ class TranslationServiceTest {
 
     @Test
     void loadRowsIgnoresNonStringLeafValues() throws Exception {
-        TranslationService service = new TranslationService(
-                tempDir.toString(),
-                "dummy-api-key",
-                "dummy-project-id",
-                "global",
-                "",
-                "en",
-                "en",
-                "",
-                new ObjectMapper(),
-                new RestTemplateBuilder()
-        );
+        TranslationService service = createService("", false, "en", "bg", 50);
 
         Files.writeString(tempDir.resolve("en.json"), """
                 {
@@ -266,18 +201,7 @@ class TranslationServiceTest {
                 sync now
                 """);
 
-        TranslationService service = new TranslationService(
-                tempDir.toString(),
-                "dummy-api-key",
-                "dummy-project-id",
-                "global",
-                "",
-                "en",
-                "en",
-                riskyTermsFile.toString(),
-                new ObjectMapper(),
-                new RestTemplateBuilder()
-        );
+        TranslationService service = createService(riskyTermsFile.toString(), false, "en", "bg", 50);
 
         List<TranslationRow> rows = List.of(
                 new TranslationRow("b", "cta", "Apply", ""),
@@ -310,18 +234,7 @@ class TranslationServiceTest {
     @Test
     @SuppressWarnings("unchecked")
     void protectPlaceholdersUsesStableSafeTokensAndRestoresRepeatedPlaceholders() throws Exception {
-        TranslationService service = new TranslationService(
-                tempDir.toString(),
-                "dummy-api-key",
-                "dummy-project-id",
-                "global",
-                "",
-                "en",
-                "en",
-                "",
-                new ObjectMapper(),
-                new RestTemplateBuilder()
-        );
+        TranslationService service = createService("", false, "en", "bg", 50);
 
         TranslationRow row = new TranslationRow("b", "placeholder", "Hi {{name}} and {id} and {{name}} and {{0}}", "");
         Method flattenRows = TranslationService.class.getDeclaredMethod("flattenRows", List.class);
@@ -359,18 +272,7 @@ class TranslationServiceTest {
     @Test
     @SuppressWarnings("unchecked")
     void validateResultsMarksItemInvalidWhenProtectedTokensRemainAfterRestoration() throws Exception {
-        TranslationService service = new TranslationService(
-                tempDir.toString(),
-                "dummy-api-key",
-                "dummy-project-id",
-                "global",
-                "",
-                "en",
-                "en",
-                "",
-                new ObjectMapper(),
-                new RestTemplateBuilder()
-        );
+        TranslationService service = createService("", false, "en", "bg", 50);
 
         TranslationRow row = new TranslationRow("b", "placeholder", "Hello {{name}}", "");
         Method runTranslationPipeline = TranslationService.class.getDeclaredMethod(
@@ -414,6 +316,42 @@ class TranslationServiceTest {
         assertTrue(issues.getFirst().contains("unresolved placeholder tokens remained after restoration"));
     }
 
+    @Test
+    void constructorFailsFastWhenGlossaryEnabledButGlossaryConfigMissing() {
+        IllegalStateException exception = assertThrows(IllegalStateException.class, () -> new TranslationService(
+                tempDir.toString(),
+                "dummy-api-key",
+                "",
+                "bg",
+                "dummy-project-id",
+                "global",
+                "general/translation-llm",
+                true,
+                "",
+                50,
+                "en",
+                "en",
+                "",
+                new ObjectMapper(),
+                new RestTemplateBuilder()
+        ));
+
+        assertTrue(exception.getMessage().contains("myapp.google.sourceLanguage"));
+        assertTrue(exception.getMessage().contains("myapp.google.glossaryId"));
+    }
+
+    @Test
+    void constructorFailsWhenBatchSizeIsNotPositive() {
+        IllegalStateException exception = assertThrows(IllegalStateException.class, () -> createService(
+                "",
+                false,
+                "en",
+                "bg",
+                0
+        ));
+        assertTrue(exception.getMessage().contains("batch size"));
+    }
+
     private int countOccurrences(String value, String token) {
         int count = 0;
         int index = 0;
@@ -422,5 +360,31 @@ class TranslationServiceTest {
             index += token.length();
         }
         return count;
+    }
+
+    private TranslationService createService(
+            String riskyTermsFile,
+            boolean glossaryEnabled,
+            String sourceLanguage,
+            String targetLanguage,
+            int batchSize
+    ) throws Exception {
+        return new TranslationService(
+                tempDir.toString(),
+                "dummy-api-key",
+                sourceLanguage,
+                targetLanguage,
+                "dummy-project-id",
+                "global",
+                "general/translation-llm",
+                glossaryEnabled,
+                "bg-terms",
+                batchSize,
+                "en",
+                "en",
+                riskyTermsFile,
+                new ObjectMapper(),
+                new RestTemplateBuilder()
+        );
     }
 }

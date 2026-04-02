@@ -7,17 +7,34 @@ myapp.local.dataDir=data
 # Google Cloud Translation API key.
 myapp.local.googleApiKey=
 
-# Optional Google project id (only needed for some setups).
+# Default source language for Google translation requests.
+# Example values: en, bg
+myapp.local.googleSourceLanguage=
+
+# Default target language for Google translation requests.
+# Example values: bg, en
+myapp.local.googleTargetLanguage=
+
+# Google project id used for v3 Translation API requests.
 myapp.local.googleProjectId=
 
 # Google Cloud Translation location. Keep "global" unless you use
 # region-specific resources like custom glossaries.
 myapp.local.googleLocation=global
 
+# Google Translation model to use.
+myapp.local.googleModel=general/translation-llm
+
+# Enable glossary for Google translation requests.
+myapp.local.googleGlossaryEnabled=false
+
 # Optional glossary id or full glossary path for Translation LLM.
 # Example short id: app-terms
 # Example full path: projects/my-project/locations/us-central1/glossaries/app-terms
 myapp.local.googleGlossaryId=
+
+# Max number of strings sent per Google Translate API request.
+myapp.local.googleBatchSize=50
 
 # Language code used by Google when returning the display names
 # in /languages API (for example: en, fr, de, ar).
