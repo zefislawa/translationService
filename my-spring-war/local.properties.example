@@ -10,6 +10,15 @@ myapp.local.googleApiKey=
 # Optional Google project id (only needed for some setups).
 myapp.local.googleProjectId=
 
+# Google Cloud Translation location. Keep "global" unless you use
+# region-specific resources like custom glossaries.
+myapp.local.googleLocation=global
+
+# Optional glossary id or full glossary path for Translation LLM.
+# Example short id: app-terms
+# Example full path: projects/my-project/locations/us-central1/glossaries/app-terms
+myapp.local.googleGlossaryId=
+
 # Language code used by Google when returning the display names
 # in /languages API (for example: en, fr, de, ar).
 myapp.local.supportedLanguagesDisplayLocale=en
@@ -20,4 +29,3 @@ myapp.local.uiPreferredTargetLanguage=fr
 # Reference language used to populate the "Reference" column.
 # Example values: en, fr
 myapp.local.referenceLanguageFile=en
-
