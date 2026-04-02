@@ -9,9 +9,12 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.boot.web.client.RestTemplateBuilder;
 
+import java.lang.reflect.Method;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -304,4 +307,120 @@ class TranslationServiceTest {
         assertFalse(preprocessing.get(2).path("containsPlaceholders").asBoolean());
     }
 
+    @Test
+    @SuppressWarnings("unchecked")
+    void protectPlaceholdersUsesStableSafeTokensAndRestoresRepeatedPlaceholders() throws Exception {
+        TranslationService service = new TranslationService(
+                tempDir.toString(),
+                "dummy-api-key",
+                "dummy-project-id",
+                "global",
+                "",
+                "en",
+                "en",
+                "",
+                new ObjectMapper(),
+                new RestTemplateBuilder()
+        );
+
+        TranslationRow row = new TranslationRow("b", "placeholder", "Hi {{name}} and {id} and {{name}} and {{0}}", "");
+        Method flattenRows = TranslationService.class.getDeclaredMethod("flattenRows", List.class);
+        flattenRows.setAccessible(true);
+        List<?> flattened = (List<?>) flattenRows.invoke(service, List.of(row));
+
+        Method preprocessItems = TranslationService.class.getDeclaredMethod("preprocessItems", List.class, Set.class);
+        preprocessItems.setAccessible(true);
+        List<?> preprocessed = (List<?>) preprocessItems.invoke(service, flattened, Set.of());
+
+        Method protectPlaceholders = TranslationService.class.getDeclaredMethod("protectPlaceholders", List.class);
+        protectPlaceholders.setAccessible(true);
+        List<?> protectedItems = (List<?>) protectPlaceholders.invoke(service, preprocessed);
+        Object protectedItem = protectedItems.getFirst();
+
+        Method protectedTextAccessor = protectedItem.getClass().getDeclaredMethod("protectedText");
+        String protectedText = (String) protectedTextAccessor.invoke(protectedItem);
+        assertTrue(protectedText.contains("__PH_NAME__"));
+        assertTrue(protectedText.contains("__PH_ID__"));
+        assertTrue(protectedText.contains("__PH_0__"));
+        assertEquals(2, countOccurrences(protectedText, "__PH_NAME__"));
+
+        Method placeholdersAccessor = protectedItem.getClass().getDeclaredMethod("placeholders");
+        Map<String, String> placeholders = (Map<String, String>) placeholdersAccessor.invoke(protectedItem);
+        assertEquals("{{name}}", placeholders.get("__PH_NAME__"));
+        assertEquals("{id}", placeholders.get("__PH_ID__"));
+        assertEquals("{{0}}", placeholders.get("__PH_0__"));
+
+        Method restorePlaceholders = TranslationService.class.getDeclaredMethod("restorePlaceholders", List.class, List.class);
+        restorePlaceholders.setAccessible(true);
+        List<String> restored = (List<String>) restorePlaceholders.invoke(service, protectedItems, List.of(protectedText));
+        assertEquals(row.getText(), restored.getFirst());
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void validateResultsMarksItemInvalidWhenProtectedTokensRemainAfterRestoration() throws Exception {
+        TranslationService service = new TranslationService(
+                tempDir.toString(),
+                "dummy-api-key",
+                "dummy-project-id",
+                "global",
+                "",
+                "en",
+                "en",
+                "",
+                new ObjectMapper(),
+                new RestTemplateBuilder()
+        );
+
+        TranslationRow row = new TranslationRow("b", "placeholder", "Hello {{name}}", "");
+        Method runTranslationPipeline = TranslationService.class.getDeclaredMethod(
+                "runTranslationPipeline",
+                String.class,
+                List.class,
+                String.class,
+                String.class
+        );
+        runTranslationPipeline.setAccessible(true);
+        Object pipelineResult = runTranslationPipeline.invoke(service, null, List.of(row), "en", "en");
+
+        Method reportAccessor = pipelineResult.getClass().getDeclaredMethod("validationReport");
+        Object validationReport = reportAccessor.invoke(pipelineResult);
+        Method issuesAccessor = validationReport.getClass().getDeclaredMethod("issues");
+        List<String> baselineIssues = (List<String>) issuesAccessor.invoke(validationReport);
+        assertTrue(baselineIssues.isEmpty());
+
+        Method flattenRows = TranslationService.class.getDeclaredMethod("flattenRows", List.class);
+        flattenRows.setAccessible(true);
+        List<?> flattened = (List<?>) flattenRows.invoke(service, List.of(row));
+        Method preprocessItems = TranslationService.class.getDeclaredMethod("preprocessItems", List.class, Set.class);
+        preprocessItems.setAccessible(true);
+        List<?> preprocessed = (List<?>) preprocessItems.invoke(service, flattened, Set.of());
+        Method protectPlaceholders = TranslationService.class.getDeclaredMethod("protectPlaceholders", List.class);
+        protectPlaceholders.setAccessible(true);
+        List<?> protectedItems = (List<?>) protectPlaceholders.invoke(service, preprocessed);
+
+        String unresolvedOutput = "Bonjour __PH_BROKEN__";
+        Method validateResults = TranslationService.class.getDeclaredMethod("validateResults", List.class, List.class, List.class);
+        validateResults.setAccessible(true);
+        Object failedReport = validateResults.invoke(
+                service,
+                protectedItems,
+                List.of(unresolvedOutput),
+                List.of(unresolvedOutput)
+        );
+
+        List<String> issues = (List<String>) issuesAccessor.invoke(failedReport);
+        assertEquals(1, issues.size());
+        assertTrue(issues.getFirst().contains("unresolved placeholder tokens remained after restoration"));
+    }
+
+    private int countOccurrences(String value, String token) {
+        int count = 0;
+        int index = 0;
+        while ((index = value.indexOf(token, index)) >= 0) {
+            count++;
+            index += token.length();
+        }
+        return count;
+    }
 }
