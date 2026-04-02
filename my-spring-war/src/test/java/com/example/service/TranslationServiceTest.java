@@ -264,7 +264,7 @@ class TranslationServiceTest {
         Method protectPlaceholders = TranslationService.class.getDeclaredMethod("protectPlaceholders", List.class);
         protectPlaceholders.setAccessible(true);
         List<?> protectedItems = (List<?>) protectPlaceholders.invoke(service, preprocessed);
-        Object protectedItem = protectedItems.getFirst();
+        Object protectedItem = protectedItems.get(0);
 
         Method protectedTextAccessor = protectedItem.getClass().getDeclaredMethod("protectedText");
         String protectedText = (String) protectedTextAccessor.invoke(protectedItem);
@@ -282,7 +282,7 @@ class TranslationServiceTest {
         Method restorePlaceholders = TranslationService.class.getDeclaredMethod("restorePlaceholders", List.class, List.class);
         restorePlaceholders.setAccessible(true);
         List<String> restored = (List<String>) restorePlaceholders.invoke(service, protectedItems, List.of(protectedText));
-        assertEquals(row.getText(), restored.getFirst());
+        assertEquals(row.getText(), restored.get(0));
     }
 
     @Test
@@ -340,8 +340,8 @@ class TranslationServiceTest {
 
         List<?> issues = (List<?>) issuesAccessor.invoke(failedReport);
         assertEquals(1, issues.size());
-        Method messageAccessor = issues.getFirst().getClass().getDeclaredMethod("message");
-        assertTrue(((String) messageAccessor.invoke(issues.getFirst())).contains("unresolved placeholder tokens remained after restoration"));
+        Method messageAccessor = issues.get(0).getClass().getDeclaredMethod("message");
+        assertTrue(((String) messageAccessor.invoke(issues.get(0))).contains("unresolved placeholder tokens remained after restoration"));
     }
 
     @Test
@@ -362,6 +362,8 @@ class TranslationServiceTest {
                 "en",
                 "en",
                 "",
+                true,
+                true,
                 new ObjectMapper(),
                 new RestTemplateBuilder()
         ));
@@ -608,6 +610,8 @@ class TranslationServiceTest {
                 "en",
                 "en",
                 riskyTermsFile,
+                true,
+                true,
                 new ObjectMapper(),
                 new RestTemplateBuilder()
         );
