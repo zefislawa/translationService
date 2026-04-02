@@ -27,12 +27,16 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.TreeSet;
 import java.util.Objects;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
 @Service
@@ -43,13 +47,21 @@ public class TranslationService {
     private final RestTemplate restTemplate;
     private final String googleApiKey;
     private final String googleProjectId;
+    private final String googleLocation;
+    private final String googleGlossaryId;
     private final String supportedLanguagesDisplayLocale;
     private final String referenceLanguageFile;
+    private static final Pattern PLACEHOLDER_PATTERN = Pattern.compile(
+            "\\{\\{[^{}]+}}|\\{[^{}]+}|%\\d*\\$?[sdfoxegc]|<[^>]+>"
+    );
+    private static final String PLACEHOLDER_TOKEN_PREFIX = "__PH_";
 
     public TranslationService(
             @Value("${myapp.dataDir}") String defaultDataDir,
             @Value("${myapp.google.apiKey}") String googleApiKey,
             @Value("${myapp.google.projectId}") String googleProjectId,
+            @Value("${myapp.google.location:global}") String googleLocation,
+            @Value("${myapp.google.glossaryId:}") String googleGlossaryId,
             @Value("${myapp.google.supportedLanguagesDisplayLocale:en}") String supportedLanguagesDisplayLocale,
             @Value("${myapp.referenceLanguageFile:en}") String referenceLanguageFile,
             ObjectMapper mapper,
@@ -58,6 +70,8 @@ public class TranslationService {
         this.defaultDataDir = Path.of(defaultDataDir).toAbsolutePath();
         this.googleApiKey = googleApiKey;
         this.googleProjectId = googleProjectId;
+        this.googleLocation = googleLocation;
+        this.googleGlossaryId = googleGlossaryId;
         this.supportedLanguagesDisplayLocale = supportedLanguagesDisplayLocale;
         this.referenceLanguageFile = referenceLanguageFile;
         this.mapper = mapper;
@@ -172,10 +186,8 @@ public class TranslationService {
         }
 
         String sourceLanguage = resolveSourceLanguage(fileName);
-        List<String> contents = rows.stream().map(TranslationRow::getText).toList();
-        List<String> translatedTexts = sourceLanguage.equalsIgnoreCase(targetLanguage)
-                ? contents
-                : callGoogleTranslate(sourceLanguage, targetLanguage, contents);
+        TranslationPipelineResult pipelineResult = runTranslationPipeline(rows, sourceLanguage, targetLanguage);
+        List<String> translatedTexts = pipelineResult.translatedTexts();
 
         if (translatedTexts.size() != rows.size()) {
             throw new IllegalStateException("Google Translate returned an unexpected number of translated strings");
@@ -192,6 +204,7 @@ public class TranslationService {
         Path sourceFile = resolveJsonFile(customPath, fileName);
         Path outputFile = sourceFile.getParent().resolve(targetLanguage + ".json").normalize();
         mapper.writerWithDefaultPrettyPrinter().writeValue(outputFile.toFile(), translatedPayload);
+        writeValidationReport(outputFile, pipelineResult.validationReport());
 
         return new TranslationExportResult(outputFile.toAbsolutePath().toString(), targetLanguage, translatedTexts.size());
     }
@@ -208,10 +221,8 @@ public class TranslationService {
 
         String sourceLanguage = extractLanguageFromFileName(sourceFileName);
         String targetLanguage = extractLanguageFromFileName(targetFileName);
-        List<String> contents = rows.stream().map(TranslationRow::getText).toList();
-        List<String> translatedTexts = sourceLanguage.equalsIgnoreCase(targetLanguage)
-                ? contents
-                : callGoogleTranslate(sourceLanguage, targetLanguage, contents);
+        TranslationPipelineResult pipelineResult = runTranslationPipeline(rows, sourceLanguage, targetLanguage);
+        List<String> translatedTexts = pipelineResult.translatedTexts();
 
         if (translatedTexts.size() != rows.size()) {
             throw new IllegalStateException("Google Translate returned an unexpected number of translated strings");
@@ -235,6 +246,7 @@ public class TranslationService {
         }
 
         mapper.writerWithDefaultPrettyPrinter().writeValue(outputFile.toFile(), existingPayload);
+        writeValidationReport(outputFile, pipelineResult.validationReport());
         return new TranslationExportResult(outputFile.getFileName().toString(), targetLanguage, translatedTexts.size());
     }
 
@@ -383,38 +395,202 @@ public class TranslationService {
                 .toList();
     }
 
-    private List<String> callGoogleTranslate(String sourceLanguage, String targetLanguage, List<String> contents) {
+    private TranslationPipelineResult runTranslationPipeline(List<TranslationRow> rows, String sourceLanguage, String targetLanguage) {
+        List<TranslationItem> flattenedItems = flattenRows(rows);
+        List<PreparedTranslationItem> preprocessedItems = preprocessItems(flattenedItems);
+        List<PreparedTranslationItem> protectedItems = protectPlaceholders(preprocessedItems);
+        List<PreparedTranslationItem> classifiedItems = classifyRiskyItems(protectedItems);
+
+        List<String> translatedProtectedTexts = sourceLanguage.equalsIgnoreCase(targetLanguage)
+                ? classifiedItems.stream().map(PreparedTranslationItem::protectedText).toList()
+                : callGoogleTranslationLlm(sourceLanguage, targetLanguage, classifiedItems);
+
+        if (translatedProtectedTexts.size() != classifiedItems.size()) {
+            throw new IllegalStateException("Google Translation API returned an unexpected number of translated strings");
+        }
+
+        List<String> restoredTexts = restorePlaceholders(classifiedItems, translatedProtectedTexts);
+        ValidationReport validationReport = validateResults(classifiedItems, translatedProtectedTexts, restoredTexts);
+        return new TranslationPipelineResult(restoredTexts, validationReport);
+    }
+
+    private List<TranslationItem> flattenRows(List<TranslationRow> rows) {
+        List<TranslationItem> items = new ArrayList<>(rows.size());
+        for (int i = 0; i < rows.size(); i++) {
+            TranslationRow row = rows.get(i);
+            items.add(new TranslationItem(i, row.getSection(), row.getKey(), Objects.requireNonNullElse(row.getText(), "")));
+        }
+        return items;
+    }
+
+    private List<PreparedTranslationItem> preprocessItems(List<TranslationItem> items) {
+        return items.stream()
+                .map(item -> new PreparedTranslationItem(
+                        item,
+                        item.text().replace("\r\n", "\n"),
+                        item.text().replace("\r\n", "\n"),
+                        Map.of(),
+                        false,
+                        ""
+                ))
+                .toList();
+    }
+
+    private List<PreparedTranslationItem> protectPlaceholders(List<PreparedTranslationItem> items) {
+        List<PreparedTranslationItem> result = new ArrayList<>(items.size());
+        for (PreparedTranslationItem item : items) {
+            Matcher matcher = PLACEHOLDER_PATTERN.matcher(item.normalizedText());
+            Map<String, String> placeholderMap = new LinkedHashMap<>();
+            StringBuffer protectedBuffer = new StringBuffer();
+            int placeholderCounter = 0;
+            while (matcher.find()) {
+                String token = PLACEHOLDER_TOKEN_PREFIX + placeholderCounter++ + "__";
+                placeholderMap.put(token, matcher.group());
+                matcher.appendReplacement(protectedBuffer, Matcher.quoteReplacement(token));
+            }
+            matcher.appendTail(protectedBuffer);
+            result.add(new PreparedTranslationItem(
+                    item.item(),
+                    item.normalizedText(),
+                    protectedBuffer.toString(),
+                    placeholderMap,
+                    item.risky(),
+                    item.riskReason()
+            ));
+        }
+        return result;
+    }
+
+    private List<PreparedTranslationItem> classifyRiskyItems(List<PreparedTranslationItem> items) {
+        return items.stream()
+                .map(item -> {
+                    String text = item.protectedText();
+                    boolean isRisky = text.isBlank() || text.matches("^[\\d\\s\\p{Punct}]+$");
+                    String riskReason = isRisky ? "blank-or-non-linguistic" : "";
+                    return new PreparedTranslationItem(item.item(), item.normalizedText(), item.protectedText(), item.placeholders(), isRisky, riskReason);
+                })
+                .toList();
+    }
+
+    private List<String> callGoogleTranslationLlm(
+            String sourceLanguage,
+            String targetLanguage,
+            List<PreparedTranslationItem> items
+    ) {
         requireGoogleApiKey();
+        requireGoogleProjectId();
+
+        String endpoint = "https://translation.googleapis.com/v3/projects/" + googleProjectId
+                + "/locations/" + googleLocation + ":translateText";
         String url = UriComponentsBuilder
-                .fromHttpUrl("https://translation.googleapis.com/language/translate/v2")
+                .fromHttpUrl(endpoint)
                 .queryParam("key", googleApiKey)
                 .toUriString();
 
-        GoogleTranslateRequest body = new GoogleTranslateRequest(contents, sourceLanguage, targetLanguage, "text");
+        List<String> contents = items.stream().map(PreparedTranslationItem::protectedText).toList();
+        GoogleTranslateTextRequest body = new GoogleTranslateTextRequest(
+                contents,
+                sourceLanguage,
+                targetLanguage,
+                "text/plain",
+                "general/translation-llm",
+                resolveGlossaryConfig()
+        );
 
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
 
-        ResponseEntity<GoogleTranslateResponse> response = restTemplate.postForEntity(
+        ResponseEntity<GoogleTranslateTextResponse> response = restTemplate.postForEntity(
                 url,
                 new HttpEntity<>(body, headers),
-                GoogleTranslateResponse.class
+                GoogleTranslateTextResponse.class
         );
 
-        GoogleTranslateResponse responseBody = response.getBody();
-        if (responseBody == null || responseBody.data() == null || responseBody.data().translations() == null) {
+        GoogleTranslateTextResponse responseBody = response.getBody();
+        if (responseBody == null || responseBody.translations() == null) {
             throw new IllegalStateException("Google Translate response is empty");
         }
 
-        return responseBody.data().translations()
+        List<String> translations = responseBody.translations()
                 .stream()
-                .map(GoogleTranslation::translatedText)
+                .map(GoogleTextTranslation::translatedText)
                 .toList();
+        List<String> glossaryTranslations = responseBody.glossaryTranslations() == null
+                ? List.of()
+                : responseBody.glossaryTranslations().stream()
+                .map(GoogleTextTranslation::translatedText)
+                .toList();
+
+        return glossaryTranslations.size() == translations.size() ? glossaryTranslations : translations;
+    }
+
+    private List<String> restorePlaceholders(List<PreparedTranslationItem> items, List<String> translatedTexts) {
+        List<String> restored = new ArrayList<>(translatedTexts.size());
+        for (int i = 0; i < items.size(); i++) {
+            PreparedTranslationItem item = items.get(i);
+            String text = translatedTexts.get(i);
+            for (Map.Entry<String, String> placeholder : item.placeholders().entrySet()) {
+                text = text.replace(placeholder.getKey(), placeholder.getValue());
+            }
+            restored.add(text);
+        }
+        return restored;
+    }
+
+    private ValidationReport validateResults(
+            List<PreparedTranslationItem> items,
+            List<String> translatedProtectedTexts,
+            List<String> restoredTexts
+    ) {
+        List<String> issues = new ArrayList<>();
+        for (int i = 0; i < items.size(); i++) {
+            PreparedTranslationItem item = items.get(i);
+            String translatedProtected = translatedProtectedTexts.get(i);
+            String restored = restoredTexts.get(i);
+
+            Set<String> missingTokens = new HashSet<>();
+            for (String token : item.placeholders().keySet()) {
+                if (!translatedProtected.contains(token)) {
+                    missingTokens.add(token);
+                }
+            }
+
+            if (!missingTokens.isEmpty()) {
+                issues.add(item.item().section() + "." + item.item().key() + ": missing placeholder tokens " + missingTokens);
+            }
+            if (restored.isBlank() && !item.normalizedText().isBlank()) {
+                issues.add(item.item().section() + "." + item.item().key() + ": translated result became blank");
+            }
+        }
+        return new ValidationReport(items.size(), issues.size(), issues);
+    }
+
+    private void writeValidationReport(Path outputFile, ValidationReport report) throws Exception {
+        String fileName = outputFile.getFileName().toString().replaceFirst("(?i)\\.json$", "");
+        Path reportFile = outputFile.getParent().resolve(fileName + ".validation-report.json");
+        mapper.writerWithDefaultPrettyPrinter().writeValue(reportFile.toFile(), report);
+    }
+
+    private GoogleGlossaryConfig resolveGlossaryConfig() {
+        if (googleGlossaryId == null || googleGlossaryId.isBlank()) {
+            return null;
+        }
+
+        String glossaryPath = googleGlossaryId.startsWith("projects/")
+                ? googleGlossaryId
+                : "projects/" + googleProjectId + "/locations/" + googleLocation + "/glossaries/" + googleGlossaryId;
+        return new GoogleGlossaryConfig(glossaryPath);
     }
 
     private void requireGoogleApiKey() {
         if (googleApiKey == null || googleApiKey.isBlank()) {
             throw new IllegalStateException("Google API key is missing. Configure it via environment variable or local.properties");
+        }
+    }
+
+    private void requireGoogleProjectId() {
+        if (googleProjectId == null || googleProjectId.isBlank()) {
+            throw new IllegalStateException("Google project id is missing. Configure it via environment variable or local.properties");
         }
     }
 
@@ -466,21 +642,26 @@ public class TranslationService {
         return normalized.toLowerCase(Locale.ROOT);
     }
 
-    private record GoogleTranslateRequest(
-            List<String> q,
-            String source,
-            String target,
-            String format
+    private record GoogleTranslateTextRequest(
+            List<String> contents,
+            String sourceLanguageCode,
+            String targetLanguageCode,
+            String mimeType,
+            String model,
+            GoogleGlossaryConfig glossaryConfig
     ) {
     }
 
-    private record GoogleTranslateResponse(GoogleTranslateData data) {
+    private record GoogleGlossaryConfig(String glossary) {
     }
 
-    private record GoogleTranslateData(List<GoogleTranslation> translations) {
+    private record GoogleTranslateTextResponse(
+            List<GoogleTextTranslation> translations,
+            List<GoogleTextTranslation> glossaryTranslations
+    ) {
     }
 
-    private record GoogleTranslation(String translatedText) {
+    private record GoogleTextTranslation(String translatedText) {
     }
 
     private record GoogleSupportedLanguagesResponse(GoogleSupportedLanguagesData data) {
@@ -501,5 +682,24 @@ public class TranslationService {
             this.languageCode = languageCode;
             this.displayName = displayName;
         }
+    }
+
+    private record TranslationItem(int index, String section, String key, String text) {
+    }
+
+    private record PreparedTranslationItem(
+            TranslationItem item,
+            String normalizedText,
+            String protectedText,
+            Map<String, String> placeholders,
+            boolean risky,
+            String riskReason
+    ) {
+    }
+
+    private record ValidationReport(int totalItems, int issueCount, List<String> issues) {
+    }
+
+    private record TranslationPipelineResult(List<String> translatedTexts, ValidationReport validationReport) {
     }
 }
