@@ -3,6 +3,7 @@ package com.example.service;
 import com.example.api.dto.TranslationCompareResult;
 import com.example.api.dto.TranslationExportResult;
 import com.example.api.dto.TranslationRow;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -13,6 +14,8 @@ import java.nio.file.Path;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class TranslationServiceTest {
 
@@ -29,6 +32,7 @@ class TranslationServiceTest {
                 "",
                 "en",
                 "en",
+                "",
                 new ObjectMapper(),
                 new RestTemplateBuilder()
         );
@@ -78,6 +82,7 @@ class TranslationServiceTest {
                 "",
                 "en",
                 "en",
+                "",
                 new ObjectMapper(),
                 new RestTemplateBuilder()
         );
@@ -119,6 +124,7 @@ class TranslationServiceTest {
                 "",
                 "en",
                 "en",
+                "",
                 new ObjectMapper(),
                 new RestTemplateBuilder()
         );
@@ -159,6 +165,7 @@ class TranslationServiceTest {
                 "",
                 "en",
                 "en",
+                "",
                 new ObjectMapper(),
                 new RestTemplateBuilder()
         );
@@ -189,6 +196,7 @@ class TranslationServiceTest {
                 "",
                 "en",
                 "en",
+                "",
                 new ObjectMapper(),
                 new RestTemplateBuilder()
         );
@@ -222,6 +230,7 @@ class TranslationServiceTest {
                 "",
                 "en",
                 "en",
+                "",
                 new ObjectMapper(),
                 new RestTemplateBuilder()
         );
@@ -244,6 +253,55 @@ class TranslationServiceTest {
         assertEquals("prefix", rows.get(0).getSection());
         assertEquals("valid", rows.get(0).getKey());
         assertEquals("ok", rows.get(0).getText());
+    }
+
+    @Test
+    void translateAndStoreWritesPreprocessingMetadataIncludingConfiguredRiskyTerms() throws Exception {
+        Path riskyTermsFile = tempDir.resolve("risky-terms.txt");
+        Files.writeString(riskyTermsFile, """
+                # one term per line
+                sync now
+                """);
+
+        TranslationService service = new TranslationService(
+                tempDir.toString(),
+                "dummy-api-key",
+                "dummy-project-id",
+                "global",
+                "",
+                "en",
+                "en",
+                riskyTermsFile.toString(),
+                new ObjectMapper(),
+                new RestTemplateBuilder()
+        );
+
+        List<TranslationRow> rows = List.of(
+                new TranslationRow("b", "cta", "Apply", ""),
+                new TranslationRow("m", "placeholder", "Hi {{name}} {id}", ""),
+                new TranslationRow("x", "configured", "Please sync now", "")
+        );
+
+        service.translateAndStore(null, "en.json", "en", rows);
+
+        Path reportFile = tempDir.resolve("en.validation-report.json");
+        JsonNode report = new ObjectMapper().readTree(Files.readString(reportFile));
+        JsonNode preprocessing = report.path("preprocessing");
+
+        assertEquals(3, preprocessing.size());
+        assertEquals(1, preprocessing.get(0).path("wordCount").asInt());
+        assertTrue(preprocessing.get(0).path("shortText").asBoolean());
+        assertTrue(preprocessing.get(0).path("risky").asBoolean());
+        assertEquals("short-ui-prefix,ambiguous-term", preprocessing.get(0).path("riskReason").asText());
+
+        assertTrue(preprocessing.get(1).path("containsPlaceholders").asBoolean());
+        assertEquals(2, preprocessing.get(1).path("placeholders").size());
+        assertEquals("{{name}}", preprocessing.get(1).path("placeholders").get(0).asText());
+        assertEquals("{id}", preprocessing.get(1).path("placeholders").get(1).asText());
+
+        assertTrue(preprocessing.get(2).path("risky").asBoolean());
+        assertEquals("configured-risky-term", preprocessing.get(2).path("riskReason").asText());
+        assertFalse(preprocessing.get(2).path("containsPlaceholders").asBoolean());
     }
 
 }
