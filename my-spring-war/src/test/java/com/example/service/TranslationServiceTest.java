@@ -7,8 +7,13 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.springframework.http.HttpMethod;
+import org.springframework.http.MediaType;
 import org.springframework.boot.web.client.RestTemplateBuilder;
+import org.springframework.test.web.client.MockRestServiceServer;
+import org.springframework.web.client.RestTemplate;
 
+import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -20,6 +25,9 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.springframework.test.web.client.match.MockRestRequestMatchers.method;
+import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
+import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 
 class TranslationServiceTest {
 
@@ -214,6 +222,8 @@ class TranslationServiceTest {
         Path reportFile = tempDir.resolve("en.validation-report.json");
         JsonNode report = new ObjectMapper().readTree(Files.readString(reportFile));
         JsonNode preprocessing = report.path("preprocessing");
+        JsonNode rowsNode = report.path("rows");
+        JsonNode summary = report.path("summary");
 
         assertEquals(3, preprocessing.size());
         assertEquals(1, preprocessing.get(0).path("wordCount").asInt());
@@ -229,6 +239,12 @@ class TranslationServiceTest {
         assertTrue(preprocessing.get(2).path("risky").asBoolean());
         assertEquals("configured-risky-term", preprocessing.get(2).path("riskReason").asText());
         assertFalse(preprocessing.get(2).path("containsPlaceholders").asBoolean());
+        assertEquals(3, rowsNode.size());
+        assertEquals("VALID", rowsNode.get(0).path("validationStatus").asText());
+        assertEquals(3, summary.path("totalStringsProcessed").asInt());
+        assertEquals(3, summary.path("validCount").asInt());
+        assertEquals(0, summary.path("invalidCount").asInt());
+        assertEquals(0, summary.path("warningCount").asInt());
     }
 
     @Test
@@ -287,9 +303,9 @@ class TranslationServiceTest {
 
         Method reportAccessor = pipelineResult.getClass().getDeclaredMethod("validationReport");
         Object validationReport = reportAccessor.invoke(pipelineResult);
-        Method errorsAccessor = validationReport.getClass().getDeclaredMethod("errors");
-        List<?> baselineErrors = (List<?>) errorsAccessor.invoke(validationReport);
-        assertTrue(baselineErrors.isEmpty());
+        Method issuesAccessor = validationReport.getClass().getDeclaredMethod("issues");
+        List<?> baselineIssues = (List<?>) issuesAccessor.invoke(validationReport);
+        assertTrue(baselineIssues.isEmpty());
 
         Method flattenRows = TranslationService.class.getDeclaredMethod("flattenRows", List.class);
         flattenRows.setAccessible(true);
@@ -315,17 +331,17 @@ class TranslationServiceTest {
         Object failedReport = validateResults.invoke(
                 service,
                 protectedItems,
-                List.of(unresolvedOutput),
+                List.of(newTranslatedItemResult(0, "b.placeholder", unresolvedOutput, "mock-route", false, "")),
                 List.of(unresolvedOutput),
                 "en",
                 "bg",
                 Set.of()
         );
 
-        List<?> errors = (List<?>) errorsAccessor.invoke(failedReport);
-        assertEquals(1, errors.size());
-        Method messageAccessor = errors.getFirst().getClass().getDeclaredMethod("message");
-        assertTrue(((String) messageAccessor.invoke(errors.getFirst())).contains("unresolved placeholder tokens remained after restoration"));
+        List<?> issues = (List<?>) issuesAccessor.invoke(failedReport);
+        assertEquals(1, issues.size());
+        Method messageAccessor = issues.getFirst().getClass().getDeclaredMethod("message");
+        assertTrue(((String) messageAccessor.invoke(issues.getFirst())).contains("unresolved placeholder tokens remained after restoration"));
     }
 
     @Test
@@ -366,6 +382,185 @@ class TranslationServiceTest {
         assertTrue(exception.getMessage().contains("batch size"));
     }
 
+    @Test
+    @SuppressWarnings("unchecked")
+    void flattenAndRebuildPreservesOriginalJsonStructure() throws Exception {
+        TranslationService service = createService("", false, "en", "bg", 50);
+        ObjectMapper objectMapper = new ObjectMapper();
+        Object sourcePayload = objectMapper.readValue("""
+                {
+                  "b": {"title": "Hello", "count": 3},
+                  "meta": ["keep", "array"]
+                }
+                """, Object.class);
+
+        Method rebuild = TranslationService.class.getDeclaredMethod("rebuildTranslatedPayload", Object.class, Map.class);
+        rebuild.setAccessible(true);
+        Object rebuilt = rebuild.invoke(service, sourcePayload, Map.of("b.title", "Bonjour"));
+        JsonNode rebuiltNode = objectMapper.valueToTree(rebuilt);
+
+        assertEquals("Bonjour", rebuiltNode.path("b").path("title").asText());
+        assertEquals(3, rebuiltNode.path("b").path("count").asInt());
+        assertEquals("keep", rebuiltNode.path("meta").get(0).asText());
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void riskyStringClassificationMarksShortUiAndConfiguredRiskTerms() throws Exception {
+        Path riskyTermsFile = tempDir.resolve("risky-terms.txt");
+        Files.writeString(riskyTermsFile, "sync now\n");
+        TranslationService service = createService(riskyTermsFile.toString(), false, "en", "bg", 50);
+
+        Method flattenRows = TranslationService.class.getDeclaredMethod("flattenRows", List.class);
+        flattenRows.setAccessible(true);
+        List<?> flattened = (List<?>) flattenRows.invoke(service, List.of(
+                new TranslationRow("b", "cta", "Apply", ""),
+                new TranslationRow("x", "sync", "Please sync now", "")
+        ));
+
+        Method preprocessItems = TranslationService.class.getDeclaredMethod("preprocessItems", List.class, Set.class);
+        preprocessItems.setAccessible(true);
+        List<?> preprocessed = (List<?>) preprocessItems.invoke(service, flattened, Set.of("sync now"));
+
+        Method metadataAccessor = preprocessed.get(0).getClass().getDeclaredMethod("metadata");
+        Object metadata1 = metadataAccessor.invoke(preprocessed.get(0));
+        Method riskyAccessor = metadata1.getClass().getDeclaredMethod("risky");
+        assertTrue((Boolean) riskyAccessor.invoke(metadata1));
+        Object metadata2 = metadataAccessor.invoke(preprocessed.get(1));
+        assertTrue((Boolean) riskyAccessor.invoke(metadata2));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void validationDetectsMissingPlaceholderTokens() throws Exception {
+        TranslationService service = createService("", false, "en", "bg", 50);
+        TranslationRow row = new TranslationRow("b", "name", "Hello {{name}}", "");
+        Method flattenRows = TranslationService.class.getDeclaredMethod("flattenRows", List.class);
+        flattenRows.setAccessible(true);
+        List<?> flattened = (List<?>) flattenRows.invoke(service, List.of(row));
+        Method preprocessItems = TranslationService.class.getDeclaredMethod("preprocessItems", List.class, Set.class);
+        preprocessItems.setAccessible(true);
+        List<?> preprocessed = (List<?>) preprocessItems.invoke(service, flattened, Set.of());
+        Method protectPlaceholders = TranslationService.class.getDeclaredMethod("protectPlaceholders", List.class);
+        protectPlaceholders.setAccessible(true);
+        List<?> protectedItems = (List<?>) protectPlaceholders.invoke(service, preprocessed);
+
+        Method validateResults = TranslationService.class.getDeclaredMethod("validateResults", List.class, List.class, List.class, String.class, String.class, Set.class);
+        validateResults.setAccessible(true);
+        Object report = validateResults.invoke(
+                service,
+                protectedItems,
+                List.of(newTranslatedItemResult(0, "b.name", "Bonjour", "mock", false, "")),
+                List.of("Bonjour"),
+                "en",
+                "fr",
+                Set.of()
+        );
+
+        Method summaryAccessor = report.getClass().getDeclaredMethod("summary");
+        Object summary = summaryAccessor.invoke(report);
+        Method invalidCountAccessor = summary.getClass().getDeclaredMethod("invalidCount");
+        assertEquals(1, invalidCountAccessor.invoke(summary));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void duplicateSourceConsistencyAddsWarnings() throws Exception {
+        TranslationService service = createService("", false, "en", "bg", 50);
+        Method flattenRows = TranslationService.class.getDeclaredMethod("flattenRows", List.class);
+        flattenRows.setAccessible(true);
+        List<?> flattened = (List<?>) flattenRows.invoke(service, List.of(
+                new TranslationRow("b", "k1", "Apply", ""),
+                new TranslationRow("m", "k2", "Apply", "")
+        ));
+        Method preprocessItems = TranslationService.class.getDeclaredMethod("preprocessItems", List.class, Set.class);
+        preprocessItems.setAccessible(true);
+        List<?> preprocessed = (List<?>) preprocessItems.invoke(service, flattened, Set.of());
+        Method protectPlaceholders = TranslationService.class.getDeclaredMethod("protectPlaceholders", List.class);
+        protectPlaceholders.setAccessible(true);
+        List<?> protectedItems = (List<?>) protectPlaceholders.invoke(service, preprocessed);
+
+        Method validateResults = TranslationService.class.getDeclaredMethod("validateResults", List.class, List.class, List.class, String.class, String.class, Set.class);
+        validateResults.setAccessible(true);
+        Object report = validateResults.invoke(
+                service,
+                protectedItems,
+                List.of(
+                        newTranslatedItemResult(0, "b.k1", "Aplicar", "mock", true, ""),
+                        newTranslatedItemResult(1, "m.k2", "Aplicación", "mock", true, "")
+                ),
+                List.of("Aplicar", "Aplicación"),
+                "en",
+                "es",
+                Set.of()
+        );
+        Method summaryAccessor = report.getClass().getDeclaredMethod("summary");
+        Object summary = summaryAccessor.invoke(report);
+        Method warningsAccessor = summary.getClass().getDeclaredMethod("warningCount");
+        assertEquals(2, warningsAccessor.invoke(summary));
+    }
+
+    @Test
+    void integrationSmallSampleGeneratesJsonAndCsvReports() throws Exception {
+        TranslationService service = createService("", false, "en", "en", 50);
+        Files.writeString(tempDir.resolve("en.json"), """
+                {
+                  "b": {"hello": "Hello"}
+                }
+                """);
+        service.translateAndStore(null, "en.json", "en", List.of(new TranslationRow("b", "hello", "Hello", "")));
+        assertTrue(Files.exists(tempDir.resolve("en.validation-report.json")));
+        assertTrue(Files.exists(tempDir.resolve("en.validation-report.csv")));
+        String csv = Files.readString(tempDir.resolve("en.validation-report.csv"));
+        assertTrue(csv.contains("full_key,prefix"));
+        assertTrue(csv.contains("summary_metric,value"));
+    }
+
+    @Test
+    void integrationRiskySubsetIncludesRiskyFlagsInReportRows() throws Exception {
+        TranslationService service = createService("", false, "en", "en", 50);
+        Files.writeString(tempDir.resolve("en.json"), """
+                {
+                  "b": {"apply": "Apply"},
+                  "x": {"longText": "This is a long neutral sentence"}
+                }
+                """);
+        service.translateAndStore(null, "en.json", "en", List.of(
+                new TranslationRow("b", "apply", "Apply", ""),
+                new TranslationRow("x", "longText", "This is a long neutral sentence", "")
+        ));
+        JsonNode report = new ObjectMapper().readTree(Files.readString(tempDir.resolve("en.validation-report.json")));
+        assertTrue(report.path("rows").get(0).path("riskyFlag").asBoolean());
+    }
+
+    @Test
+    void integrationFullRunDryWithMockedGoogleResponsesWorksEndToEnd() throws Exception {
+        TranslationService service = createService("", false, "en", "fr", 50);
+        Files.writeString(tempDir.resolve("en.json"), """
+                {
+                  "b": {"hello": "Hello {{name}}"}
+                }
+                """);
+        MockRestServiceServer server = bindMockServer(service);
+        server.expect(requestTo(org.hamcrest.Matchers.containsString("translation.googleapis.com")))
+                .andExpect(method(HttpMethod.POST))
+                .andRespond(withSuccess("""
+                        {
+                          "translations":[{"translatedText":"Bonjour __PH_NAME__"}]
+                        }
+                        """, MediaType.APPLICATION_JSON));
+
+        service.translateAndStore(null, "en.json", "fr", List.of(
+                new TranslationRow("b", "hello", "Hello {{name}}", "")
+        ));
+        server.verify();
+
+        JsonNode translated = new ObjectMapper().readTree(Files.readString(tempDir.resolve("fr.json")));
+        assertEquals("Bonjour {{name}}", translated.path("b").path("hello").asText());
+        JsonNode report = new ObjectMapper().readTree(Files.readString(tempDir.resolve("fr.validation-report.json")));
+        assertEquals("VALID", report.path("rows").get(0).path("validationStatus").asText());
+    }
+
     private int countOccurrences(String value, String token) {
         int count = 0;
         int index = 0;
@@ -374,6 +569,20 @@ class TranslationServiceTest {
             index += token.length();
         }
         return count;
+    }
+
+    private Object newTranslatedItemResult(int index, String fullKey, String translatedText, String route, boolean risky, String riskReason) throws Exception {
+        Class<?> translatedItemResultClass = Class.forName("com.example.service.TranslationService$TranslatedItemResult");
+        var constructor = translatedItemResultClass.getDeclaredConstructor(int.class, String.class, String.class, String.class, boolean.class, String.class);
+        constructor.setAccessible(true);
+        return constructor.newInstance(index, fullKey, translatedText, route, risky, riskReason);
+    }
+
+    private MockRestServiceServer bindMockServer(TranslationService service) throws Exception {
+        Field restTemplateField = TranslationService.class.getDeclaredField("restTemplate");
+        restTemplateField.setAccessible(true);
+        RestTemplate restTemplate = (RestTemplate) restTemplateField.get(service);
+        return MockRestServiceServer.bindTo(restTemplate).build();
     }
 
     private TranslationService createService(

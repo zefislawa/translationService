@@ -28,6 +28,7 @@ import org.springframework.web.util.UriComponentsBuilder;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.concurrent.TimeUnit;
 import java.util.ArrayList;
@@ -46,6 +47,7 @@ import java.util.Objects;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
+import java.util.stream.Collectors;
 
 @Service
 public class TranslationService {
@@ -478,9 +480,22 @@ public class TranslationService {
         Set<String> configuredRiskyTerms = loadConfiguredRiskyTerms(customPath);
         List<PreparedTranslationItem> preprocessedItems = preprocessItems(flattenedItems, configuredRiskyTerms);
         List<PreparedTranslationItem> protectedItems = protectPlaceholders(preprocessedItems);
-        List<String> translatedProtectedTexts = sourceLanguage.equalsIgnoreCase(targetLanguage)
-                ? protectedItems.stream().map(PreparedTranslationItem::protectedText).toList()
+        List<TranslatedItemResult> translatedItems = sourceLanguage.equalsIgnoreCase(targetLanguage)
+                ? protectedItems.stream()
+                .map(item -> new TranslatedItemResult(
+                        item.item().index(),
+                        item.item().fullKey(),
+                        item.protectedText(),
+                        "identity/no-translation",
+                        item.metadata().risky(),
+                        item.metadata().riskReason()
+                ))
+                .toList()
                 : translateByRouteV1(sourceLanguage, targetLanguage, protectedItems);
+        List<String> translatedProtectedTexts = translatedItems.stream()
+                .sorted(Comparator.comparingInt(TranslatedItemResult::index))
+                .map(TranslatedItemResult::translatedText)
+                .toList();
 
         if (translatedProtectedTexts.size() != protectedItems.size()) {
             throw new IllegalStateException("Google Translation API returned an unexpected number of translated strings");
@@ -489,7 +504,7 @@ public class TranslationService {
         List<String> restoredTexts = restorePlaceholders(protectedItems, translatedProtectedTexts);
         ValidationReport validationReport = validateResults(
                 protectedItems,
-                translatedProtectedTexts,
+                translatedItems,
                 restoredTexts,
                 sourceLanguage,
                 targetLanguage,
@@ -634,7 +649,7 @@ public class TranslationService {
         return allTranslations;
     }
 
-    private List<String> translateByRouteV1(String sourceLanguage, String targetLanguage, List<PreparedTranslationItem> items) {
+    private List<TranslatedItemResult> translateByRouteV1(String sourceLanguage, String targetLanguage, List<PreparedTranslationItem> items) {
         List<String> translatedTexts = callGoogleTranslationLlm(sourceLanguage, targetLanguage, items);
         if (translatedTexts.size() != items.size()) {
             throw new IllegalStateException("Translation route v1 returned an unexpected number of translated strings");
@@ -654,7 +669,6 @@ public class TranslationService {
         }
         return perItemResults.stream()
                 .sorted(Comparator.comparingInt(TranslatedItemResult::index))
-                .map(TranslatedItemResult::translatedText)
                 .toList();
     }
 
@@ -766,25 +780,27 @@ public class TranslationService {
 
     private ValidationReport validateResults(
             List<PreparedTranslationItem> items,
-            List<String> translatedProtectedTexts,
+            List<TranslatedItemResult> translatedItems,
             List<String> restoredTexts,
             String sourceLanguage,
             String targetLanguage,
             Set<String> configuredRiskyTerms
     ) {
-        List<ValidationIssue> errors = new ArrayList<>();
-        List<ValidationIssue> warnings = new ArrayList<>();
+        List<ValidationIssue> issues = new ArrayList<>();
         List<PreprocessingReportItem> preprocessingItems = new ArrayList<>();
-        List<TranslatedItemValidation> itemValidations = new ArrayList<>();
+        List<ValidationReportRow> reportRows = new ArrayList<>();
         Map<String, Map<String, Set<String>>> translationsByNormalizedSource = new LinkedHashMap<>();
+        int duplicateInconsistencyFindings = 0;
 
         for (int i = 0; i < items.size(); i++) {
             PreparedTranslationItem item = items.get(i);
-            String translatedProtected = translatedProtectedTexts.get(i);
+            TranslatedItemResult translatedItem = translatedItems.get(i);
+            String translatedProtected = translatedItem.translatedText();
             String restored = restoredTexts.get(i);
             String fullKey = item.item().fullKey();
-            List<String> itemErrorMessages = new ArrayList<>();
-            List<String> itemWarningMessages = new ArrayList<>();
+            List<String> itemIssueMessages = new ArrayList<>();
+            boolean hasError = false;
+            boolean hasWarning = false;
 
             Set<String> missingTokens = new HashSet<>();
             for (String token : item.placeholders().keySet()) {
@@ -794,21 +810,24 @@ public class TranslationService {
             }
             if (!missingTokens.isEmpty()) {
                 String message = "missing placeholder tokens " + missingTokens;
-                errors.add(new ValidationIssue(fullKey, message));
-                itemErrorMessages.add(message);
+                issues.add(new ValidationIssue(fullKey, item.item().prefix(), "missing-placeholder-token", "ERROR", message));
+                itemIssueMessages.add(message);
+                hasError = true;
             }
 
             if (restored.isBlank() && !item.normalizedText().isBlank()) {
                 String message = "translated result became blank";
-                errors.add(new ValidationIssue(fullKey, message));
-                itemErrorMessages.add(message);
+                issues.add(new ValidationIssue(fullKey, item.item().prefix(), "blank-translation", "ERROR", message));
+                itemIssueMessages.add(message);
+                hasError = true;
             }
 
             Matcher unresolvedTokenMatcher = PROTECTED_PLACEHOLDER_TOKEN_PATTERN.matcher(restored);
             if (unresolvedTokenMatcher.find()) {
                 String message = "unresolved placeholder tokens remained after restoration";
-                errors.add(new ValidationIssue(fullKey, message));
-                itemErrorMessages.add(message);
+                issues.add(new ValidationIssue(fullKey, item.item().prefix(), "leftover-protected-token", "ERROR", message));
+                itemIssueMessages.add(message);
+                hasError = true;
             }
 
             List<String> missingOriginalPlaceholders = new ArrayList<>();
@@ -819,8 +838,9 @@ public class TranslationService {
             }
             if (!missingOriginalPlaceholders.isEmpty()) {
                 String message = "missing restored placeholders " + missingOriginalPlaceholders;
-                errors.add(new ValidationIssue(fullKey, message));
-                itemErrorMessages.add(message);
+                issues.add(new ValidationIssue(fullKey, item.item().prefix(), "missing-restored-placeholder", "ERROR", message));
+                itemIssueMessages.add(message);
+                hasError = true;
             }
 
             if (!sourceLanguage.equalsIgnoreCase(targetLanguage) && containsConfiguredRiskyTerm(item.normalizedText(), configuredRiskyTerms)) {
@@ -829,8 +849,9 @@ public class TranslationService {
                 for (String glossaryTerm : configuredRiskyTerms) {
                     if (normalizedSource.contains(glossaryTerm) && normalizedRestored.contains(glossaryTerm)) {
                         String message = "possible untranslated glossary term leak: '" + glossaryTerm + "'";
-                        warnings.add(new ValidationIssue(fullKey, message));
-                        itemWarningMessages.add(message);
+                        issues.add(new ValidationIssue(fullKey, item.item().prefix(), "glossary-term-leak", "WARNING", message));
+                        itemIssueMessages.add(message);
+                        hasWarning = true;
                     }
                 }
             }
@@ -840,8 +861,9 @@ public class TranslationService {
                 int restoredLength = restored.trim().length();
                 if (sourceLength > 0 && restoredLength > sourceLength * 3 + 15) {
                     String message = "short UI text expanded significantly (" + sourceLength + " -> " + restoredLength + " chars)";
-                    warnings.add(new ValidationIssue(fullKey, message));
-                    itemWarningMessages.add(message);
+                    issues.add(new ValidationIssue(fullKey, item.item().prefix(), "short-ui-expansion", "WARNING", message));
+                    itemIssueMessages.add(message);
+                    hasWarning = true;
                 }
             }
 
@@ -865,12 +887,17 @@ public class TranslationService {
                     metadata.risky(),
                     metadata.riskReason()
             ));
-            itemValidations.add(new TranslatedItemValidation(
+            reportRows.add(new ValidationReportRow(
                     fullKey,
+                    item.item().prefix(),
+                    item.normalizedText(),
+                    item.protectedText(),
+                    translatedProtected,
                     restored,
-                    itemErrorMessages.isEmpty(),
-                    itemErrorMessages,
-                    itemWarningMessages
+                    item.metadata().risky(),
+                    translatedItem.route(),
+                    hasError ? "INVALID" : hasWarning ? "WARNING" : "VALID",
+                    itemIssueMessages
             ));
         }
 
@@ -882,26 +909,44 @@ public class TranslationService {
             String message = "same source text produced inconsistent translations in this run";
             for (Set<String> keys : translationToKeys.values()) {
                 for (String key : keys) {
-                    warnings.add(new ValidationIssue(key, message));
-                    TranslatedItemValidation itemValidation = itemValidations.stream()
+                    ValidationReportRow row = reportRows.stream()
                             .filter(validation -> validation.fullKey().equals(key))
                             .findFirst()
                             .orElse(null);
-                    if (itemValidation != null) {
-                        itemValidation.warnings().add(message);
+                    String prefix = row == null ? "" : row.prefix();
+                    issues.add(new ValidationIssue(key, prefix, "duplicate-inconsistency", "WARNING", message));
+                    duplicateInconsistencyFindings++;
+                    if (row != null) {
+                        row.issuesOrWarnings().add(message);
+                        if ("VALID".equals(row.validationStatus())) {
+                            row.validationStatus = "WARNING";
+                        }
                     }
                 }
             }
         }
 
+        int invalidCount = (int) reportRows.stream().filter(row -> "INVALID".equals(row.validationStatus())).count();
+        int warningCount = (int) reportRows.stream().filter(row -> "WARNING".equals(row.validationStatus())).count();
+        int validCount = reportRows.size() - invalidCount - warningCount;
+        Map<String, Long> issueCountsByType = issues.stream()
+                .collect(Collectors.groupingBy(ValidationIssue::type, LinkedHashMap::new, Collectors.counting()));
+        Map<String, Long> countsByPrefix = reportRows.stream()
+                .collect(Collectors.groupingBy(ValidationReportRow::prefix, LinkedHashMap::new, Collectors.counting()));
+
         return new ValidationReport(
-                items.size(),
-                errors.size(),
-                warnings.size(),
-                errors,
-                warnings,
-                itemValidations,
-                preprocessingItems
+                reportRows,
+                preprocessingItems,
+                issues,
+                new ValidationSummary(
+                        items.size(),
+                        validCount,
+                        invalidCount,
+                        warningCount,
+                        issueCountsByType,
+                        countsByPrefix,
+                        duplicateInconsistencyFindings
+                )
         );
     }
 
@@ -1009,8 +1054,50 @@ public class TranslationService {
 
     private void writeValidationReport(Path outputFile, ValidationReport report) throws Exception {
         String fileName = outputFile.getFileName().toString().replaceFirst("(?i)\\.json$", "");
-        Path reportFile = outputFile.getParent().resolve(fileName + ".validation-report.json");
-        mapper.writerWithDefaultPrettyPrinter().writeValue(reportFile.toFile(), report);
+        Path jsonReportFile = outputFile.getParent().resolve(fileName + ".validation-report.json");
+        mapper.writerWithDefaultPrettyPrinter().writeValue(jsonReportFile.toFile(), report);
+        Path csvReportFile = outputFile.getParent().resolve(fileName + ".validation-report.csv");
+        Files.writeString(csvReportFile, buildCsvReport(report), StandardCharsets.UTF_8);
+    }
+
+    private String buildCsvReport(ValidationReport report) {
+        StringBuilder csv = new StringBuilder();
+        csv.append("full_key,prefix,source_text,protected_source_text,translated_protected_text,final_translated_text,risky_flag,route_used,validation_status,issues_or_warnings\n");
+        for (ValidationReportRow row : report.rows()) {
+            String issuesJoined = String.join(" | ", row.issuesOrWarnings());
+            csv.append(csvCell(row.fullKey())).append(',')
+                    .append(csvCell(row.prefix())).append(',')
+                    .append(csvCell(row.sourceText())).append(',')
+                    .append(csvCell(row.protectedSourceText())).append(',')
+                    .append(csvCell(row.translatedProtectedText())).append(',')
+                    .append(csvCell(row.finalTranslatedText())).append(',')
+                    .append(csvCell(String.valueOf(row.riskyFlag()))).append(',')
+                    .append(csvCell(row.routeUsed())).append(',')
+                    .append(csvCell(row.validationStatus())).append(',')
+                    .append(csvCell(issuesJoined))
+                    .append('\n');
+        }
+        csv.append('\n');
+        csv.append("summary_metric,value\n");
+        csv.append("total_strings_processed,").append(report.summary().totalStringsProcessed()).append('\n');
+        csv.append("valid_count,").append(report.summary().validCount()).append('\n');
+        csv.append("invalid_count,").append(report.summary().invalidCount()).append('\n');
+        csv.append("warning_count,").append(report.summary().warningCount()).append('\n');
+        csv.append("duplicate_inconsistency_findings,").append(report.summary().duplicateInconsistencyFindings()).append('\n');
+        for (Map.Entry<String, Long> issueEntry : report.summary().issueCountsByType().entrySet()) {
+            csv.append(csvCell("issue_count_by_type:" + issueEntry.getKey())).append(',')
+                    .append(issueEntry.getValue()).append('\n');
+        }
+        for (Map.Entry<String, Long> prefixEntry : report.summary().countsByPrefix().entrySet()) {
+            csv.append(csvCell("count_by_prefix:" + prefixEntry.getKey())).append(',')
+                    .append(prefixEntry.getValue()).append('\n');
+        }
+        return csv.toString();
+    }
+
+    private String csvCell(String value) {
+        String safeValue = value == null ? "" : value;
+        return "\"" + safeValue.replace("\"", "\"\"") + "\"";
     }
 
     private GoogleGlossaryConfig resolveGlossaryConfig() {
@@ -1208,27 +1295,75 @@ public class TranslationService {
 
     private record ValidationIssue(
             String fullKey,
+            String prefix,
+            String type,
+            String severity,
             String message
     ) {
     }
 
-    private record TranslatedItemValidation(
-            String fullKey,
-            String translatedText,
-            boolean valid,
-            List<String> errors,
-            List<String> warnings
+    private static final class ValidationReportRow {
+        private final String fullKey;
+        private final String prefix;
+        private final String sourceText;
+        private final String protectedSourceText;
+        private final String translatedProtectedText;
+        private final String finalTranslatedText;
+        private final boolean riskyFlag;
+        private final String routeUsed;
+        private String validationStatus;
+        private final List<String> issuesOrWarnings;
+
+        private ValidationReportRow(String fullKey,
+                                    String prefix,
+                                    String sourceText,
+                                    String protectedSourceText,
+                                    String translatedProtectedText,
+                                    String finalTranslatedText,
+                                    boolean riskyFlag,
+                                    String routeUsed,
+                                    String validationStatus,
+                                    List<String> issuesOrWarnings) {
+            this.fullKey = fullKey;
+            this.prefix = prefix;
+            this.sourceText = sourceText;
+            this.protectedSourceText = protectedSourceText;
+            this.translatedProtectedText = translatedProtectedText;
+            this.finalTranslatedText = finalTranslatedText;
+            this.riskyFlag = riskyFlag;
+            this.routeUsed = routeUsed;
+            this.validationStatus = validationStatus;
+            this.issuesOrWarnings = issuesOrWarnings;
+        }
+
+        public String fullKey() { return fullKey; }
+        public String prefix() { return prefix; }
+        public String sourceText() { return sourceText; }
+        public String protectedSourceText() { return protectedSourceText; }
+        public String translatedProtectedText() { return translatedProtectedText; }
+        public String finalTranslatedText() { return finalTranslatedText; }
+        public boolean riskyFlag() { return riskyFlag; }
+        public String routeUsed() { return routeUsed; }
+        public String validationStatus() { return validationStatus; }
+        public List<String> issuesOrWarnings() { return issuesOrWarnings; }
+    }
+
+    private record ValidationSummary(
+            int totalStringsProcessed,
+            int validCount,
+            int invalidCount,
+            int warningCount,
+            Map<String, Long> issueCountsByType,
+            Map<String, Long> countsByPrefix,
+            int duplicateInconsistencyFindings
     ) {
     }
 
     private record ValidationReport(
-            int totalItems,
-            int errorCount,
-            int warningCount,
-            List<ValidationIssue> errors,
-            List<ValidationIssue> warnings,
-            List<TranslatedItemValidation> items,
-            List<PreprocessingReportItem> preprocessing
+            List<ValidationReportRow> rows,
+            List<PreprocessingReportItem> preprocessing,
+            List<ValidationIssue> issues,
+            ValidationSummary summary
     ) {
     }
 
