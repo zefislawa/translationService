@@ -124,10 +124,13 @@ public class TranslationService {
         requireValidRetrySettings();
         validateGlossaryConfiguration();
         this.mapper = mapper;
+        SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
+        requestFactory.setOutputStreaming(false);
+
         this.restTemplate = restTemplateBuilder
                 .setConnectTimeout(Duration.ofSeconds(15))
                 .setReadTimeout(Duration.ofSeconds(60))
-                .requestFactory(() -> new BufferingClientHttpRequestFactory(new SimpleClientHttpRequestFactory()))
+                .requestFactory(() -> new BufferingClientHttpRequestFactory(requestFactory))
                 .additionalInterceptors(new OutboundApiLoggingInterceptor(mapper))
                 .build();
         Files.createDirectories(this.defaultDataDir);
@@ -238,7 +241,7 @@ public class TranslationService {
             throw new IllegalArgumentException("targetLanguage is required");
         }
 
-        String sourceLanguage = resolveSourceLanguage(fileName);
+        String sourceLanguage = resolveSourceLanguage(fileName, rows);
         TranslationPipelineResult pipelineResult = runTranslationPipeline(customPath, rows, sourceLanguage, targetLanguage);
         List<String> translatedTexts = pipelineResult.translatedTexts();
 
@@ -1265,19 +1268,70 @@ public class TranslationService {
         return normalized;
     }
 
-    private String resolveSourceLanguage(String fileName) {
+    private String resolveSourceLanguage(String fileName, List<TranslationRow> rows) {
         String fallbackLanguage = extractLanguageFromFileName(normalizeReferenceLanguageFile(referenceLanguageFile));
 
         if (fileName == null || fileName.isBlank()) {
-            return fallbackLanguage.toLowerCase(Locale.ROOT);
+            return inferSourceLanguageFromRows(rows, fallbackLanguage);
         }
 
         String normalized = Path.of(fileName).getFileName().toString().replaceFirst("(?i)\\.json$", "");
         if (!normalized.matches("^[A-Za-z]{2,3}(?:[-_][A-Za-z0-9]{2,8})*$")) {
-            return fallbackLanguage.toLowerCase(Locale.ROOT);
+            return inferSourceLanguageFromRows(rows, fallbackLanguage);
         }
 
         return normalized.toLowerCase(Locale.ROOT);
+    }
+
+    private String inferSourceLanguageFromRows(List<TranslationRow> rows, String fallbackLanguage) {
+        String fallback = fallbackLanguage.toLowerCase(Locale.ROOT);
+        if (rows == null || rows.isEmpty()) {
+            return fallback;
+        }
+
+        int latinLikeRows = 0;
+        int analyzedRows = 0;
+        for (TranslationRow row : rows) {
+            String text = row == null ? null : row.getText();
+            if (text == null || text.isBlank()) {
+                continue;
+            }
+
+            boolean hasLetter = false;
+            boolean hasNonLatinLetter = false;
+            for (int i = 0; i < text.length(); i++) {
+                char ch = text.charAt(i);
+                if (!Character.isLetter(ch)) {
+                    continue;
+                }
+                hasLetter = true;
+                Character.UnicodeBlock block = Character.UnicodeBlock.of(ch);
+                if (block != Character.UnicodeBlock.BASIC_LATIN
+                        && block != Character.UnicodeBlock.LATIN_1_SUPPLEMENT
+                        && block != Character.UnicodeBlock.LATIN_EXTENDED_A
+                        && block != Character.UnicodeBlock.LATIN_EXTENDED_B) {
+                    hasNonLatinLetter = true;
+                    break;
+                }
+            }
+            if (!hasLetter) {
+                continue;
+            }
+
+            analyzedRows++;
+            if (!hasNonLatinLetter) {
+                latinLikeRows++;
+            }
+        }
+
+        if (analyzedRows == 0) {
+            return fallback;
+        }
+        double latinRatio = (double) latinLikeRows / analyzedRows;
+        if (latinRatio >= 0.8d) {
+            return "en";
+        }
+        return fallback;
     }
 
     private record GoogleTranslateTextRequest(
