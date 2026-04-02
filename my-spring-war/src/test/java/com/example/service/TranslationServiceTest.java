@@ -287,9 +287,9 @@ class TranslationServiceTest {
 
         Method reportAccessor = pipelineResult.getClass().getDeclaredMethod("validationReport");
         Object validationReport = reportAccessor.invoke(pipelineResult);
-        Method issuesAccessor = validationReport.getClass().getDeclaredMethod("issues");
-        List<String> baselineIssues = (List<String>) issuesAccessor.invoke(validationReport);
-        assertTrue(baselineIssues.isEmpty());
+        Method errorsAccessor = validationReport.getClass().getDeclaredMethod("errors");
+        List<?> baselineErrors = (List<?>) errorsAccessor.invoke(validationReport);
+        assertTrue(baselineErrors.isEmpty());
 
         Method flattenRows = TranslationService.class.getDeclaredMethod("flattenRows", List.class);
         flattenRows.setAccessible(true);
@@ -302,18 +302,30 @@ class TranslationServiceTest {
         List<?> protectedItems = (List<?>) protectPlaceholders.invoke(service, preprocessed);
 
         String unresolvedOutput = "Bonjour __PH_BROKEN__";
-        Method validateResults = TranslationService.class.getDeclaredMethod("validateResults", List.class, List.class, List.class);
+        Method validateResults = TranslationService.class.getDeclaredMethod(
+                "validateResults",
+                List.class,
+                List.class,
+                List.class,
+                String.class,
+                String.class,
+                Set.class
+        );
         validateResults.setAccessible(true);
         Object failedReport = validateResults.invoke(
                 service,
                 protectedItems,
                 List.of(unresolvedOutput),
-                List.of(unresolvedOutput)
+                List.of(unresolvedOutput),
+                "en",
+                "bg",
+                Set.of()
         );
 
-        List<String> issues = (List<String>) issuesAccessor.invoke(failedReport);
-        assertEquals(1, issues.size());
-        assertTrue(issues.getFirst().contains("unresolved placeholder tokens remained after restoration"));
+        List<?> errors = (List<?>) errorsAccessor.invoke(failedReport);
+        assertEquals(1, errors.size());
+        Method messageAccessor = errors.getFirst().getClass().getDeclaredMethod("message");
+        assertTrue(((String) messageAccessor.invoke(errors.getFirst())).contains("unresolved placeholder tokens remained after restoration"));
     }
 
     @Test
