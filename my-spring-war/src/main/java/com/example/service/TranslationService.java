@@ -240,20 +240,51 @@ public class TranslationService {
             throw new IllegalStateException("Google Translate returned an unexpected number of translated strings");
         }
 
-        Map<String, Map<String, String>> translatedPayload = new LinkedHashMap<>();
+        Map<String, String> translatedByFullKey = new LinkedHashMap<>();
         for (int i = 0; i < rows.size(); i++) {
             TranslationRow row = rows.get(i);
-            translatedPayload
-                    .computeIfAbsent(row.getSection(), k -> new LinkedHashMap<>())
-                    .put(row.getKey(), translatedTexts.get(i));
+            translatedByFullKey.put(row.getSection() + "." + row.getKey(), translatedTexts.get(i));
         }
 
         Path sourceFile = resolveJsonFile(customPath, fileName);
         Path outputFile = sourceFile.getParent().resolve(targetLanguage + ".json").normalize();
+        Object sourcePayload = mapper.readValue(sourceFile.toFile(), Object.class);
+        Object translatedPayload = rebuildTranslatedPayload(sourcePayload, translatedByFullKey);
         mapper.writerWithDefaultPrettyPrinter().writeValue(outputFile.toFile(), translatedPayload);
         writeValidationReport(outputFile, pipelineResult.validationReport());
 
         return new TranslationExportResult(outputFile.toAbsolutePath().toString(), targetLanguage, translatedTexts.size());
+    }
+
+    @SuppressWarnings("unchecked")
+    private Object rebuildTranslatedPayload(Object sourcePayload, Map<String, String> translatedByFullKey) {
+        if (!(sourcePayload instanceof Map<?, ?> sourceTopLevel)) {
+            throw new IllegalArgumentException("Invalid source JSON format: expected object at root");
+        }
+
+        Map<String, Object> rebuilt = new LinkedHashMap<>();
+        for (Map.Entry<?, ?> prefixEntry : sourceTopLevel.entrySet()) {
+            String prefix = String.valueOf(prefixEntry.getKey());
+            Object prefixValue = prefixEntry.getValue();
+            if (!(prefixValue instanceof Map<?, ?> nestedMap)) {
+                rebuilt.put(prefix, prefixValue);
+                continue;
+            }
+
+            Map<String, Object> rebuiltNested = new LinkedHashMap<>();
+            for (Map.Entry<?, ?> nestedEntry : nestedMap.entrySet()) {
+                String key = String.valueOf(nestedEntry.getKey());
+                Object value = nestedEntry.getValue();
+                if (value instanceof String) {
+                    String fullKey = prefix + "." + key;
+                    rebuiltNested.put(key, translatedByFullKey.getOrDefault(fullKey, (String) value));
+                } else {
+                    rebuiltNested.put(key, value);
+                }
+            }
+            rebuilt.put(prefix, rebuiltNested);
+        }
+        return rebuilt;
     }
 
     public TranslationExportResult translateAndImport(
@@ -449,14 +480,21 @@ public class TranslationService {
         List<PreparedTranslationItem> protectedItems = protectPlaceholders(preprocessedItems);
         List<String> translatedProtectedTexts = sourceLanguage.equalsIgnoreCase(targetLanguage)
                 ? protectedItems.stream().map(PreparedTranslationItem::protectedText).toList()
-                : translateByRouteV1(protectedItems);
+                : translateByRouteV1(sourceLanguage, targetLanguage, protectedItems);
 
         if (translatedProtectedTexts.size() != protectedItems.size()) {
             throw new IllegalStateException("Google Translation API returned an unexpected number of translated strings");
         }
 
         List<String> restoredTexts = restorePlaceholders(protectedItems, translatedProtectedTexts);
-        ValidationReport validationReport = validateResults(protectedItems, translatedProtectedTexts, restoredTexts);
+        ValidationReport validationReport = validateResults(
+                protectedItems,
+                translatedProtectedTexts,
+                restoredTexts,
+                sourceLanguage,
+                targetLanguage,
+                configuredRiskyTerms
+        );
         return new TranslationPipelineResult(restoredTexts, validationReport);
     }
 
@@ -596,9 +634,7 @@ public class TranslationService {
         return allTranslations;
     }
 
-    private List<String> translateByRouteV1(List<PreparedTranslationItem> items) {
-        String sourceLanguage = "en";
-        String targetLanguage = "bg";
+    private List<String> translateByRouteV1(String sourceLanguage, String targetLanguage, List<PreparedTranslationItem> items) {
         List<String> translatedTexts = callGoogleTranslationLlm(sourceLanguage, targetLanguage, items);
         if (translatedTexts.size() != items.size()) {
             throw new IllegalStateException("Translation route v1 returned an unexpected number of translated strings");
@@ -731,14 +767,24 @@ public class TranslationService {
     private ValidationReport validateResults(
             List<PreparedTranslationItem> items,
             List<String> translatedProtectedTexts,
-            List<String> restoredTexts
+            List<String> restoredTexts,
+            String sourceLanguage,
+            String targetLanguage,
+            Set<String> configuredRiskyTerms
     ) {
-        List<String> issues = new ArrayList<>();
+        List<ValidationIssue> errors = new ArrayList<>();
+        List<ValidationIssue> warnings = new ArrayList<>();
         List<PreprocessingReportItem> preprocessingItems = new ArrayList<>();
+        List<TranslatedItemValidation> itemValidations = new ArrayList<>();
+        Map<String, Map<String, Set<String>>> translationsByNormalizedSource = new LinkedHashMap<>();
+
         for (int i = 0; i < items.size(); i++) {
             PreparedTranslationItem item = items.get(i);
             String translatedProtected = translatedProtectedTexts.get(i);
             String restored = restoredTexts.get(i);
+            String fullKey = item.item().fullKey();
+            List<String> itemErrorMessages = new ArrayList<>();
+            List<String> itemWarningMessages = new ArrayList<>();
 
             Set<String> missingTokens = new HashSet<>();
             for (String token : item.placeholders().keySet()) {
@@ -746,21 +792,70 @@ public class TranslationService {
                     missingTokens.add(token);
                 }
             }
-
             if (!missingTokens.isEmpty()) {
-                issues.add(item.item().fullKey() + ": missing placeholder tokens " + missingTokens);
+                String message = "missing placeholder tokens " + missingTokens;
+                errors.add(new ValidationIssue(fullKey, message));
+                itemErrorMessages.add(message);
             }
+
             if (restored.isBlank() && !item.normalizedText().isBlank()) {
-                issues.add(item.item().fullKey() + ": translated result became blank");
+                String message = "translated result became blank";
+                errors.add(new ValidationIssue(fullKey, message));
+                itemErrorMessages.add(message);
             }
+
             Matcher unresolvedTokenMatcher = PROTECTED_PLACEHOLDER_TOKEN_PATTERN.matcher(restored);
             if (unresolvedTokenMatcher.find()) {
-                issues.add(item.item().fullKey() + ": unresolved placeholder tokens remained after restoration");
+                String message = "unresolved placeholder tokens remained after restoration";
+                errors.add(new ValidationIssue(fullKey, message));
+                itemErrorMessages.add(message);
+            }
+
+            List<String> missingOriginalPlaceholders = new ArrayList<>();
+            for (String placeholder : item.placeholders().values()) {
+                if (!restored.contains(placeholder)) {
+                    missingOriginalPlaceholders.add(placeholder);
+                }
+            }
+            if (!missingOriginalPlaceholders.isEmpty()) {
+                String message = "missing restored placeholders " + missingOriginalPlaceholders;
+                errors.add(new ValidationIssue(fullKey, message));
+                itemErrorMessages.add(message);
+            }
+
+            if (!sourceLanguage.equalsIgnoreCase(targetLanguage) && containsConfiguredRiskyTerm(item.normalizedText(), configuredRiskyTerms)) {
+                String normalizedSource = normalizeForTermCheck(item.normalizedText());
+                String normalizedRestored = normalizeForTermCheck(restored);
+                for (String glossaryTerm : configuredRiskyTerms) {
+                    if (normalizedSource.contains(glossaryTerm) && normalizedRestored.contains(glossaryTerm)) {
+                        String message = "possible untranslated glossary term leak: '" + glossaryTerm + "'";
+                        warnings.add(new ValidationIssue(fullKey, message));
+                        itemWarningMessages.add(message);
+                    }
+                }
+            }
+
+            if (item.metadata().shortText()) {
+                int sourceLength = item.normalizedText().trim().length();
+                int restoredLength = restored.trim().length();
+                if (sourceLength > 0 && restoredLength > sourceLength * 3 + 15) {
+                    String message = "short UI text expanded significantly (" + sourceLength + " -> " + restoredLength + " chars)";
+                    warnings.add(new ValidationIssue(fullKey, message));
+                    itemWarningMessages.add(message);
+                }
+            }
+
+            String normalizedSource = normalizeForTermCheck(item.normalizedText());
+            if (!normalizedSource.isEmpty()) {
+                translationsByNormalizedSource
+                        .computeIfAbsent(normalizedSource, ignored -> new LinkedHashMap<>())
+                        .computeIfAbsent(restored, ignored -> new LinkedHashSet<>())
+                        .add(fullKey);
             }
 
             PreprocessingMetadata metadata = item.metadata();
             preprocessingItems.add(new PreprocessingReportItem(
-                    item.item().fullKey(),
+                    fullKey,
                     item.item().prefix(),
                     item.item().key(),
                     metadata.wordCount(),
@@ -770,8 +865,44 @@ public class TranslationService {
                     metadata.risky(),
                     metadata.riskReason()
             ));
+            itemValidations.add(new TranslatedItemValidation(
+                    fullKey,
+                    restored,
+                    itemErrorMessages.isEmpty(),
+                    itemErrorMessages,
+                    itemWarningMessages
+            ));
         }
-        return new ValidationReport(items.size(), issues.size(), issues, preprocessingItems);
+
+        for (Map.Entry<String, Map<String, Set<String>>> entry : translationsByNormalizedSource.entrySet()) {
+            Map<String, Set<String>> translationToKeys = entry.getValue();
+            if (translationToKeys.size() <= 1) {
+                continue;
+            }
+            String message = "same source text produced inconsistent translations in this run";
+            for (Set<String> keys : translationToKeys.values()) {
+                for (String key : keys) {
+                    warnings.add(new ValidationIssue(key, message));
+                    TranslatedItemValidation itemValidation = itemValidations.stream()
+                            .filter(validation -> validation.fullKey().equals(key))
+                            .findFirst()
+                            .orElse(null);
+                    if (itemValidation != null) {
+                        itemValidation.warnings().add(message);
+                    }
+                }
+            }
+        }
+
+        return new ValidationReport(
+                items.size(),
+                errors.size(),
+                warnings.size(),
+                errors,
+                warnings,
+                itemValidations,
+                preprocessingItems
+        );
     }
 
     private int countWords(String text) {
@@ -1075,10 +1206,28 @@ public class TranslationService {
     ) {
     }
 
+    private record ValidationIssue(
+            String fullKey,
+            String message
+    ) {
+    }
+
+    private record TranslatedItemValidation(
+            String fullKey,
+            String translatedText,
+            boolean valid,
+            List<String> errors,
+            List<String> warnings
+    ) {
+    }
+
     private record ValidationReport(
             int totalItems,
-            int issueCount,
-            List<String> issues,
+            int errorCount,
+            int warningCount,
+            List<ValidationIssue> errors,
+            List<ValidationIssue> warnings,
+            List<TranslatedItemValidation> items,
             List<PreprocessingReportItem> preprocessing
     ) {
     }
