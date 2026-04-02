@@ -70,6 +70,8 @@ public class TranslationService {
     private final String supportedLanguagesDisplayLocale;
     private final String referenceLanguageFile;
     private final String riskyTermsFile;
+    private final boolean placeholderProtectionEnabled;
+    private final boolean validationEnabled;
     private static final Pattern PLACEHOLDER_PATTERN = Pattern.compile(
             "\\{\\{[^{}]+}}|\\{[^{}]+}|%\\d*\\$?[sdfoxegc]|<[^>]+>"
     );
@@ -96,6 +98,8 @@ public class TranslationService {
             @Value("${myapp.google.supportedLanguagesDisplayLocale:en}") String supportedLanguagesDisplayLocale,
             @Value("${myapp.referenceLanguageFile:en}") String referenceLanguageFile,
             @Value("${myapp.riskyTermsFile:risky-terms.txt}") String riskyTermsFile,
+            @Value("${myapp.translation.placeholderProtectionEnabled:true}") boolean placeholderProtectionEnabled,
+            @Value("${myapp.translation.validationEnabled:true}") boolean validationEnabled,
             ObjectMapper mapper,
             RestTemplateBuilder restTemplateBuilder
     ) throws Exception {
@@ -114,6 +118,8 @@ public class TranslationService {
         this.supportedLanguagesDisplayLocale = supportedLanguagesDisplayLocale;
         this.referenceLanguageFile = referenceLanguageFile;
         this.riskyTermsFile = riskyTermsFile;
+        this.placeholderProtectionEnabled = placeholderProtectionEnabled;
+        this.validationEnabled = validationEnabled;
         requireValidBatchSize();
         requireValidRetrySettings();
         validateGlossaryConfiguration();
@@ -479,7 +485,9 @@ public class TranslationService {
         List<TranslationItem> flattenedItems = flattenRows(rows);
         Set<String> configuredRiskyTerms = loadConfiguredRiskyTerms(customPath);
         List<PreparedTranslationItem> preprocessedItems = preprocessItems(flattenedItems, configuredRiskyTerms);
-        List<PreparedTranslationItem> protectedItems = protectPlaceholders(preprocessedItems);
+        List<PreparedTranslationItem> protectedItems = placeholderProtectionEnabled
+                ? protectPlaceholders(preprocessedItems)
+                : preprocessedItems;
         List<TranslatedItemResult> translatedItems = sourceLanguage.equalsIgnoreCase(targetLanguage)
                 ? protectedItems.stream()
                 .map(item -> new TranslatedItemResult(
@@ -501,16 +509,75 @@ public class TranslationService {
             throw new IllegalStateException("Google Translation API returned an unexpected number of translated strings");
         }
 
-        List<String> restoredTexts = restorePlaceholders(protectedItems, translatedProtectedTexts);
-        ValidationReport validationReport = validateResults(
+        List<String> restoredTexts = placeholderProtectionEnabled
+                ? restorePlaceholders(protectedItems, translatedProtectedTexts)
+                : translatedProtectedTexts;
+        ValidationReport validationReport = validationEnabled
+                ? validateResults(
                 protectedItems,
                 translatedItems,
                 restoredTexts,
                 sourceLanguage,
                 targetLanguage,
                 configuredRiskyTerms
-        );
+        )
+                : createValidationSkippedReport(protectedItems, translatedItems, restoredTexts);
         return new TranslationPipelineResult(restoredTexts, validationReport);
+    }
+
+    private ValidationReport createValidationSkippedReport(
+            List<PreparedTranslationItem> items,
+            List<TranslatedItemResult> translatedItems,
+            List<String> restoredTexts
+    ) {
+        List<PreprocessingReportItem> preprocessingItems = new ArrayList<>(items.size());
+        List<ValidationReportRow> rows = new ArrayList<>(items.size());
+        for (int i = 0; i < items.size(); i++) {
+            PreparedTranslationItem item = items.get(i);
+            TranslatedItemResult translatedItem = translatedItems.get(i);
+            String restored = restoredTexts.get(i);
+            PreprocessingMetadata metadata = item.metadata();
+            preprocessingItems.add(new PreprocessingReportItem(
+                    item.item().fullKey(),
+                    item.item().prefix(),
+                    item.item().key(),
+                    metadata.wordCount(),
+                    metadata.shortText(),
+                    metadata.containsPlaceholders(),
+                    metadata.placeholders(),
+                    metadata.risky(),
+                    metadata.riskReason()
+            ));
+            rows.add(new ValidationReportRow(
+                    item.item().fullKey(),
+                    item.item().prefix(),
+                    item.normalizedText(),
+                    item.protectedText(),
+                    translatedItem.translatedText(),
+                    restored,
+                    item.metadata().risky(),
+                    translatedItem.route(),
+                    "VALID",
+                    new ArrayList<>()
+            ));
+        }
+
+        Map<String, Long> countsByPrefix = rows.stream()
+                .collect(Collectors.groupingBy(ValidationReportRow::prefix, LinkedHashMap::new, Collectors.counting()));
+        return new ValidationReport(
+                rows,
+                preprocessingItems,
+                List.of(),
+                new ValidationSummary(
+                        items.size(),
+                        items.size(),
+                        0,
+                        0,
+                        Map.of(),
+                        countsByPrefix,
+                        0
+                )
+        );
     }
 
     private List<TranslationItem> flattenRows(List<TranslationRow> rows) {

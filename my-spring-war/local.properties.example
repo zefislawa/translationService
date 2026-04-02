@@ -50,3 +50,9 @@ myapp.local.referenceLanguageFile=en
 # Optional path to a newline-delimited list of additional risky terms.
 # Relative paths are resolved from the configured data directory.
 myapp.local.riskyTermsFile=risky-terms.txt
+
+# Protect placeholders like {{name}} / {id} / %s before translation.
+myapp.local.placeholderProtectionEnabled=true
+
+# Write validation report files and row-level quality checks.
+myapp.local.validationEnabled=true
