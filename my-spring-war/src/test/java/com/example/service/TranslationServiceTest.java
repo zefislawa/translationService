@@ -161,8 +161,8 @@ class TranslationServiceTest {
 
         TranslationExportResult result = service.translateAndStore(null, "risky_strings_subset.json", "en", rows);
 
-        assertEquals("en", result.getTargetLanguage());
-        assertEquals(1, result.getTextCount());
+        assertEquals("en", result.language());
+        assertEquals(1, result.count());
         assertEquals("""
                 {
                   "b" : {

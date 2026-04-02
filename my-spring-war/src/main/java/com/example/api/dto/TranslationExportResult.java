@@ -22,4 +22,12 @@ public class TranslationExportResult {
     public int getTextCount() {
         return textCount;
     }
+
+    public String language() {
+        return getTargetLanguage();
+    }
+
+    public int count() {
+        return getTextCount();
+    }
 }
