@@ -4,8 +4,11 @@
 # Folder that contains translation JSON files.
 myapp.local.dataDir=data
 
-# Google Cloud Translation API key.
-myapp.local.googleApiKey=
+# Optional path to a Google service-account JSON key used for
+# Application Default Credentials. If blank, ADC fallback applies
+# (GOOGLE_APPLICATION_CREDENTIALS env var, gcloud ADC file, or
+# attached service account on Google Cloud).
+myapp.local.googleCredentialsPath=
 
 # Default source language for Google translation requests.
 # Example values: en, bg

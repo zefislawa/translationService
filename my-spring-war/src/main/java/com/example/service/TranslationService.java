@@ -6,6 +6,8 @@ import com.example.api.dto.TranslationCompareResult;
 import com.example.api.dto.TranslationExportResult;
 import com.example.api.dto.TranslationRow;
 import com.example.api.dto.SupportedLanguage;
+import com.google.auth.oauth2.AccessToken;
+import com.google.auth.oauth2.GoogleCredentials;
 import com.fasterxml.jackson.annotation.JsonAlias;
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonProperty;
@@ -27,9 +29,11 @@ import org.springframework.web.client.RestTemplate;
 import org.springframework.web.util.UriComponentsBuilder;
 
 import java.nio.file.Files;
+import java.io.InputStream;
 import java.nio.file.Path;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.concurrent.TimeUnit;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -56,7 +60,7 @@ public class TranslationService {
     private final Path defaultDataDir;
     private final ObjectMapper mapper;
     private final RestTemplate restTemplate;
-    private final String googleApiKey;
+    private final String googleCredentialsPath;
     private final String configuredSourceLanguage;
     private final String configuredTargetLanguage;
     private final String googleProjectId;
@@ -72,6 +76,8 @@ public class TranslationService {
     private final String riskyTermsFile;
     private final boolean placeholderProtectionEnabled;
     private final boolean validationEnabled;
+    private GoogleCredentials googleCredentials;
+    private AccessToken cachedAccessToken;
     private static final Pattern PLACEHOLDER_PATTERN = Pattern.compile(
             "\\{\\{[^{}]+}}|\\{[^{}]+}|%\\d*\\$?[sdfoxegc]|<[^>]+>"
     );
@@ -84,7 +90,7 @@ public class TranslationService {
 
     public TranslationService(
             @Value("${myapp.dataDir}") String defaultDataDir,
-            @Value("${myapp.google.apiKey}") String googleApiKey,
+            @Value("${myapp.google.credentialsPath:}") String googleCredentialsPath,
             @Value("${myapp.google.sourceLanguage:}") String configuredSourceLanguage,
             @Value("${myapp.google.targetLanguage:}") String configuredTargetLanguage,
             @Value("${myapp.google.projectId}") String googleProjectId,
@@ -104,7 +110,7 @@ public class TranslationService {
             RestTemplateBuilder restTemplateBuilder
     ) throws Exception {
         this.defaultDataDir = Path.of(defaultDataDir).toAbsolutePath();
-        this.googleApiKey = googleApiKey;
+        this.googleCredentialsPath = googleCredentialsPath;
         this.configuredSourceLanguage = configuredSourceLanguage;
         this.configuredTargetLanguage = configuredTargetLanguage;
         this.googleProjectId = googleProjectId;
@@ -457,24 +463,28 @@ public class TranslationService {
     }
 
     public List<SupportedLanguage> getSupportedLanguages() {
-        requireGoogleApiKey();
+        requireGoogleProjectId();
         String url = UriComponentsBuilder
-                .fromHttpUrl("https://translation.googleapis.com/language/translate/v2/languages")
-                .queryParam("key", googleApiKey)
-                .queryParam("target", supportedLanguagesDisplayLocale)
+                .fromHttpUrl("https://translation.googleapis.com/v3/projects/" + googleProjectId + "/locations/" + googleLocation + "/supportedLanguages")
+                .queryParam("displayLanguageCode", supportedLanguagesDisplayLocale)
                 .toUriString();
 
-        ResponseEntity<GoogleSupportedLanguagesResponse> response = restTemplate.getForEntity(
+        HttpHeaders headers = new HttpHeaders();
+        headers.setBearerAuth(resolveAccessTokenValue());
+
+        ResponseEntity<GoogleSupportedLanguagesResponse> response = restTemplate.exchange(
                 url,
+                org.springframework.http.HttpMethod.GET,
+                new HttpEntity<>(headers),
                 GoogleSupportedLanguagesResponse.class
         );
 
         GoogleSupportedLanguagesResponse responseBody = response.getBody();
-        if (responseBody == null || responseBody.data() == null || responseBody.data().languages() == null) {
+        if (responseBody == null || responseBody.languages() == null) {
             throw new IllegalStateException("Google supported languages response is empty");
         }
 
-        return responseBody.data().languages().stream()
+        return responseBody.languages().stream()
                 .filter(language -> language.languageCode() != null && !language.languageCode().isBlank())
                 .map(language -> new SupportedLanguage(language.languageCode(), Objects.requireNonNullElse(language.displayName(), language.languageCode())))
                 .sorted(Comparator.comparing(SupportedLanguage::displayName, String.CASE_INSENSITIVE_ORDER))
@@ -650,15 +660,11 @@ public class TranslationService {
             String targetLanguage,
             List<PreparedTranslationItem> items
     ) {
-        requireGoogleApiKey();
         requireGoogleProjectId();
 
         String endpoint = "https://translation.googleapis.com/v3/projects/" + googleProjectId
                 + "/locations/" + googleLocation + ":translateText";
-        String url = UriComponentsBuilder
-                .fromHttpUrl(endpoint)
-                .queryParam("key", googleApiKey)
-                .toUriString();
+        String url = UriComponentsBuilder.fromHttpUrl(endpoint).toUriString();
 
         List<String> allTranslations = new ArrayList<>(items.size());
         for (int start = 0; start < items.size(); start += googleBatchSize) {
@@ -678,6 +684,7 @@ public class TranslationService {
 
             HttpHeaders headers = new HttpHeaders();
             headers.setContentType(MediaType.APPLICATION_JSON);
+            headers.setBearerAuth(resolveAccessTokenValue());
 
             log.info("Sending translation batch start={}, endExclusive={}, batchSize={}, source={}, target={}, model={}, glossaryEnabled={}",
                     start, end, batchItems.size(), sourceLanguage, targetLanguage, googleTranslationModel, googleGlossaryEnabled);
@@ -1178,16 +1185,49 @@ public class TranslationService {
         return new GoogleGlossaryConfig(glossaryPath);
     }
 
-    private void requireGoogleApiKey() {
-        if (googleApiKey == null || googleApiKey.isBlank()) {
-            throw new IllegalStateException("Google API key is missing. Configure it via environment variable or local.properties");
-        }
-    }
-
     private void requireGoogleProjectId() {
         if (googleProjectId == null || googleProjectId.isBlank()) {
             throw new IllegalStateException("Google project id is missing. Configure it via environment variable or local.properties");
         }
+    }
+
+    private synchronized String resolveAccessTokenValue() {
+        try {
+            if (googleCredentials == null) {
+                googleCredentials = loadGoogleCredentials().createScoped("https://www.googleapis.com/auth/cloud-platform");
+            }
+            if (cachedAccessToken == null || tokenExpiringSoon(cachedAccessToken)) {
+                googleCredentials.refreshIfExpired();
+                cachedAccessToken = googleCredentials.getAccessToken();
+            }
+            if (cachedAccessToken == null || cachedAccessToken.getTokenValue() == null || cachedAccessToken.getTokenValue().isBlank()) {
+                throw new IllegalStateException("Google access token is empty after credential refresh.");
+            }
+            return cachedAccessToken.getTokenValue();
+        } catch (Exception ex) {
+            throw new IllegalStateException(
+                    "Failed to resolve Google Application Default Credentials. Set GOOGLE_APPLICATION_CREDENTIALS or myapp.google.credentialsPath.",
+                    ex
+            );
+        }
+    }
+
+    private GoogleCredentials loadGoogleCredentials() throws Exception {
+        if (googleCredentialsPath != null && !googleCredentialsPath.isBlank()) {
+            Path credentialsPath = Path.of(googleCredentialsPath.trim()).toAbsolutePath().normalize();
+            if (!Files.isRegularFile(credentialsPath)) {
+                throw new IllegalStateException("Google credentials file was not found at: " + credentialsPath);
+            }
+            try (InputStream credentialsStream = Files.newInputStream(credentialsPath)) {
+                return GoogleCredentials.fromStream(credentialsStream);
+            }
+        }
+        return GoogleCredentials.getApplicationDefault();
+    }
+
+    private boolean tokenExpiringSoon(AccessToken token) {
+        Instant expiration = token.getExpirationTime() == null ? null : token.getExpirationTime().toInstant();
+        return expiration == null || expiration.minusSeconds(60).isBefore(Instant.now());
     }
 
     private void requireValidBatchSize() {
@@ -1356,10 +1396,7 @@ public class TranslationService {
     private record GoogleTextTranslation(String translatedText) {
     }
 
-    private record GoogleSupportedLanguagesResponse(GoogleSupportedLanguagesData data) {
-    }
-
-    private record GoogleSupportedLanguagesData(List<GoogleSupportedLanguage> languages) {
+    private record GoogleSupportedLanguagesResponse(List<GoogleSupportedLanguage> languages) {
     }
 
     private record GoogleSupportedLanguage(
