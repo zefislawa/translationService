@@ -10,12 +10,17 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.regex.Pattern;
 
 public class RawLocalPropertiesEnvironmentPostProcessor implements EnvironmentPostProcessor, Ordered {
 
     private static final String PROPERTY_SOURCE_NAME = "rawLocalProperties";
+    private static final Pattern ESCAPED_NEWLINE_BEFORE_PROPERTY =
+            Pattern.compile("\\\\(?:r\\\\n|n)(?=\\s*[A-Za-z0-9_.-]+\\s*[:=])");
 
     @Override
     public void postProcessEnvironment(ConfigurableEnvironment environment, SpringApplication application) {
@@ -41,26 +46,40 @@ public class RawLocalPropertiesEnvironmentPostProcessor implements EnvironmentPo
             return result;
         }
 
-        String normalizedLines = rawContent.replace("\\r\\n", "\n").replace("\\n", "\n");
-        for (String line : normalizedLines.split("\n")) {
-            String trimmed = line.trim();
-            if (trimmed.isEmpty() || trimmed.startsWith("#") || trimmed.startsWith("!")) {
-                continue;
-            }
+        String normalizedLines = rawContent.replace("\r\n", "\n").replace("\r", "\n");
+        for (String physicalLine : normalizedLines.split("\n")) {
+            for (String line : splitEscapedInlineProperties(physicalLine)) {
+                String trimmed = line.trim();
+                if (trimmed.isEmpty() || trimmed.startsWith("#") || trimmed.startsWith("!")) {
+                    continue;
+                }
 
-            int separatorIndex = indexOfSeparator(trimmed);
-            if (separatorIndex <= 0) {
-                continue;
-            }
+                int separatorIndex = indexOfSeparator(trimmed);
+                if (separatorIndex <= 0) {
+                    continue;
+                }
 
-            String key = trimmed.substring(0, separatorIndex).trim();
-            String value = trimmed.substring(separatorIndex + 1).trim();
-            if (!key.isEmpty()) {
-                result.put(key, value);
+                String key = trimmed.substring(0, separatorIndex).trim();
+                String value = trimmed.substring(separatorIndex + 1).trim();
+                if (!key.isEmpty()) {
+                    result.put(key, value);
+                }
             }
         }
 
         return result;
+    }
+
+    private static List<String> splitEscapedInlineProperties(String line) {
+        List<String> segments = new ArrayList<>();
+        int start = 0;
+        var matcher = ESCAPED_NEWLINE_BEFORE_PROPERTY.matcher(line);
+        while (matcher.find()) {
+            segments.add(line.substring(start, matcher.start()));
+            start = matcher.end();
+        }
+        segments.add(line.substring(start));
+        return segments;
     }
 
     private static int indexOfSeparator(String line) {
