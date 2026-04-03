@@ -347,7 +347,7 @@ class TranslationServiceTest {
     void constructorFailsFastWhenGlossaryEnabledButGlossaryConfigMissing() {
         IllegalStateException exception = assertThrows(IllegalStateException.class, () -> new TranslationService(
                 tempDir.toString(),
-                "dummy-api-key",
+                "",
                 "",
                 "bg",
                 "dummy-project-id",
@@ -591,7 +591,7 @@ class TranslationServiceTest {
     ) throws Exception {
         return new TranslationService(
                 tempDir.toString(),
-                "dummy-api-key",
+                "",
                 sourceLanguage,
                 targetLanguage,
                 "dummy-project-id",

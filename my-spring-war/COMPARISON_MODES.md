@@ -30,7 +30,7 @@ From repo root:
 cp local.properties.example local.properties
 ```
 
-Fill in required Google settings (`googleApiKey`, `googleProjectId`, etc.) and `myapp.local.dataDir`.
+Fill in required Google settings (`googleCredentialsPath` or `GOOGLE_APPLICATION_CREDENTIALS`, `googleProjectId`, etc.) and `myapp.local.dataDir`.
 
 ---
 
