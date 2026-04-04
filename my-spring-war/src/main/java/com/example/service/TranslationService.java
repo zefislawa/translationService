@@ -688,15 +688,6 @@ public class TranslationService {
                 allTranslations.addAll(batchTranslations);
                 continue;
             }
-            GoogleTranslateTextRequest body = new GoogleTranslateTextRequest(
-                    contents,
-                    sourceLanguage,
-                    targetLanguage,
-                    "text/plain",
-                    googleTranslationModel,
-                    resolveGlossaryConfig()
-            );
-
             HttpHeaders headers = new HttpHeaders();
             headers.setContentType(MediaType.APPLICATION_JSON);
             headers.setBearerAuth(resolveAccessTokenValue());
@@ -704,32 +695,15 @@ public class TranslationService {
             log.info("Sending translation batch start={}, endExclusive={}, batchSize={}, source={}, target={}, model={}, glossaryEnabled={}",
                     start, end, batchItems.size(), sourceLanguage, targetLanguage, googleTranslationModel, googleGlossaryEnabled);
 
-            ResponseEntity<GoogleTranslateTextResponse> response = executeTranslateBatchWithRetry(
+            List<String> selectedTranslations = translateContentsWithAdaptiveSplitting(
                     url,
-                    body,
                     headers,
+                    sourceLanguage,
+                    targetLanguage,
+                    contents,
                     start,
                     end
             );
-
-            GoogleTranslateTextResponse responseBody = response.getBody();
-            if (responseBody == null || responseBody.translations() == null) {
-                throw new IllegalStateException("Google Translate response is empty");
-            }
-
-            List<String> translations = responseBody.translations()
-                    .stream()
-                    .map(GoogleTextTranslation::translatedText)
-                    .toList();
-            List<String> glossaryTranslations = responseBody.glossaryTranslations() == null
-                    ? List.of()
-                    : responseBody.glossaryTranslations().stream()
-                    .map(GoogleTextTranslation::translatedText)
-                    .toList();
-
-            List<String> selectedTranslations = glossaryTranslations.size() == translations.size()
-                    ? glossaryTranslations
-                    : translations;
             if (selectedTranslations.size() != contents.size()) {
                 throw new IllegalStateException("Google Translate returned an unexpected number of translated strings");
             }
@@ -739,6 +713,59 @@ public class TranslationService {
             allTranslations.addAll(batchTranslations);
         }
         return allTranslations;
+    }
+
+    private List<String> translateContentsWithAdaptiveSplitting(
+            String url,
+            HttpHeaders headers,
+            String sourceLanguage,
+            String targetLanguage,
+            List<String> contents,
+            int start,
+            int end
+    ) {
+        GoogleTranslateTextRequest body = new GoogleTranslateTextRequest(
+                contents,
+                sourceLanguage,
+                targetLanguage,
+                "text/plain",
+                googleTranslationModel,
+                resolveGlossaryConfig()
+        );
+        try {
+            ResponseEntity<GoogleTranslateTextResponse> response = executeTranslateBatchWithRetry(url, body, headers, start, end);
+            GoogleTranslateTextResponse responseBody = response.getBody();
+            if (responseBody == null || responseBody.translations() == null) {
+                throw new IllegalStateException("Google Translate response is empty");
+            }
+            List<String> translations = responseBody.translations()
+                    .stream()
+                    .map(GoogleTextTranslation::translatedText)
+                    .toList();
+            List<String> glossaryTranslations = responseBody.glossaryTranslations() == null
+                    ? List.of()
+                    : responseBody.glossaryTranslations().stream()
+                    .map(GoogleTextTranslation::translatedText)
+                    .toList();
+            return glossaryTranslations.size() == translations.size() ? glossaryTranslations : translations;
+        } catch (HttpStatusCodeException ex) {
+            int statusCode = ex.getStatusCode().value();
+            if (statusCode >= 500 && statusCode < 600 && contents.size() > 1) {
+                int middle = contents.size() / 2;
+                int splitPoint = start + middle;
+                log.warn("Translation batch range=[{}, {}) failed with status={}; retrying as two sub-batches: [{}, {}) and [{}, {})",
+                        start, end, statusCode, start, splitPoint, splitPoint, end);
+                List<String> firstHalf = translateContentsWithAdaptiveSplitting(
+                        url, headers, sourceLanguage, targetLanguage, contents.subList(0, middle), start, splitPoint);
+                List<String> secondHalf = translateContentsWithAdaptiveSplitting(
+                        url, headers, sourceLanguage, targetLanguage, contents.subList(middle, contents.size()), splitPoint, end);
+                List<String> merged = new ArrayList<>(contents.size());
+                merged.addAll(firstHalf);
+                merged.addAll(secondHalf);
+                return merged;
+            }
+            throw ex;
+        }
     }
 
     private List<TranslatedItemResult> translateByRouteV1(String sourceLanguage, String targetLanguage, List<PreparedTranslationItem> items) {

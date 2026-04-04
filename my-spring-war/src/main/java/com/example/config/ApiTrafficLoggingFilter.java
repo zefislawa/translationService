@@ -96,10 +96,33 @@ public class ApiTrafficLoggingFilter extends OncePerRequestFilter {
                 : StandardCharsets.UTF_8;
 
         String text = new String(body, charset);
+        text = fixLikelyMojibake(text);
         if (text.length() <= MAX_LOG_BODY_LENGTH) {
             return text;
         }
         return text.substring(0, MAX_LOG_BODY_LENGTH) + " ...<truncated>";
+    }
+
+    private String fixLikelyMojibake(String text) {
+        if (!StringUtils.hasText(text) || !looksLikeMojibake(text)) {
+            return text;
+        }
+        String repaired = new String(text.getBytes(StandardCharsets.ISO_8859_1), StandardCharsets.UTF_8);
+        return countCyrillic(repaired) > countCyrillic(text) ? repaired : text;
+    }
+
+    private boolean looksLikeMojibake(String text) {
+        return text.contains("Ð") || text.contains("Ñ") || text.contains("ð");
+    }
+
+    private int countCyrillic(String text) {
+        int count = 0;
+        for (int i = 0; i < text.length(); i++) {
+            if (Character.UnicodeScript.of(text.charAt(i)) == Character.UnicodeScript.CYRILLIC) {
+                count++;
+            }
+        }
+        return count;
     }
 
     private boolean isLoggableBodyContentType(String contentType) {
