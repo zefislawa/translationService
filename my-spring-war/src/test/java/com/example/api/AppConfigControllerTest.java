@@ -10,11 +10,22 @@ class AppConfigControllerTest {
 
     @Test
     void returnsPreferredTargetAndDisplayLanguageFromConfig() {
-        AppConfigController controller = new AppConfigController("fr", "en");
+        AppConfigController controller = new AppConfigController("fr", "en", "bg");
 
         Map<String, String> config = controller.getConfig();
 
         assertEquals("fr", config.get("preferredTargetLanguage"));
         assertEquals("en", config.get("displayLanguageCode"));
+        assertEquals("bg", config.get("referenceLanguageFile"));
+    }
+
+    @Test
+    void fallsBackDisplayLanguageToReferenceLanguageWhenDisplayLanguageMissing() {
+        AppConfigController controller = new AppConfigController("fr", "", "bg.json");
+
+        Map<String, String> config = controller.getConfig();
+
+        assertEquals("bg", config.get("displayLanguageCode"));
+        assertEquals("bg", config.get("referenceLanguageFile"));
     }
 }
