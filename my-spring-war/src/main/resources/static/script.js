@@ -15,6 +15,7 @@ let availableFiles = [];
 let mergedPayload = null;
 let translationProgressLogCount = 0;
 let translationProgressState = null;
+let activeTranslationAbortController = null;
 
 const elements = {
   successMessage: document.getElementById('successMessage'),
@@ -65,6 +66,7 @@ const elements = {
   translationProgressEtaText: document.getElementById('translationProgressEtaText'),
   translationProgressBar: document.getElementById('translationProgressBar'),
   translationProgressLogs: document.getElementById('translationProgressLogs'),
+  stopTranslationBtn: document.getElementById('stopTranslationBtn'),
   closeTranslationProgressBtn: document.getElementById('closeTranslationProgressBtn')
 };
 
@@ -566,7 +568,7 @@ async function loadRows() {
   showSuccessMessage(`Loaded ${rows.length} rows from ${selectedFile}.`);
 }
 
-async function translateAndStore(targetLanguage) {
+async function translateAndStore(targetLanguage, signal) {
   const payloadRows = rows
     .filter((r) => r.selected !== false)
     .map((r) => ({
@@ -578,6 +580,7 @@ async function translateAndStore(targetLanguage) {
   const res = await fetch('/api/translations/translate', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
+    signal,
     body: JSON.stringify({
       fileName: selectedFile,
       targetLanguage,
@@ -814,6 +817,8 @@ function openTranslationProgressDialog(title) {
   elements.translationProgressBar.style.width = '0%';
   elements.translationProgressBar.parentElement.setAttribute('aria-valuenow', '0');
   elements.translationProgressLogs.innerHTML = '';
+  elements.stopTranslationBtn.classList.remove('hidden');
+  elements.stopTranslationBtn.disabled = false;
   elements.closeTranslationProgressBtn.classList.add('hidden');
   elements.translationProgressDialog.classList.add('show');
   elements.translationProgressDialog.setAttribute('aria-hidden', 'false');
@@ -851,6 +856,7 @@ function completeTranslationProgress(successText, logLine) {
     clearInterval(translationProgressState.intervalId);
     translationProgressState.intervalId = null;
   }
+  elements.stopTranslationBtn.classList.add('hidden');
   elements.closeTranslationProgressBtn.classList.remove('hidden');
 }
 
@@ -859,6 +865,7 @@ function closeTranslationProgressDialog() {
     clearInterval(translationProgressState.intervalId);
   }
   translationProgressState = null;
+  activeTranslationAbortController = null;
   elements.translationProgressDialog.classList.remove('show');
   elements.translationProgressDialog.setAttribute('aria-hidden', 'true');
 }
@@ -986,7 +993,8 @@ async function handleTranslate() {
   updateTranslationProgress(25, 'Sending translation request...', `Calling translation service for ${selectedFile}.`);
 
   try {
-    const result = await translateAndStore(targetLanguage);
+    activeTranslationAbortController = new AbortController();
+    const result = await translateAndStore(targetLanguage, activeTranslationAbortController.signal);
     updateTranslationProgress(78, 'Validating translated file...', 'Translation completed. Validating placeholders and risky terms.');
     await handleLoadFiles();
     completeTranslationProgress(
@@ -998,10 +1006,32 @@ async function handleTranslate() {
       `Successfully translated ${Number(result.textCount || 0)} labels/rows. File: ${result.outputFile}`
     );
   } catch (error) {
+    if (error.name === 'AbortError') {
+      updateTranslationProgress(100, 'Translation stopped.', 'Translation process was stopped by user.');
+      elements.stopTranslationBtn.classList.add('hidden');
+      elements.closeTranslationProgressBtn.classList.remove('hidden');
+      return;
+    }
     updateTranslationProgress(100, 'Translation failed. Please review the error and try again.', `Error: ${error.message}`);
+    elements.stopTranslationBtn.classList.add('hidden');
     elements.closeTranslationProgressBtn.classList.remove('hidden');
     throw error;
+  } finally {
+    activeTranslationAbortController = null;
   }
+}
+
+function stopTranslation() {
+  if (!activeTranslationAbortController) {
+    return;
+  }
+  elements.stopTranslationBtn.disabled = true;
+  updateTranslationProgress(
+    translationProgressState ? translationProgressState.currentPercent : 0,
+    'Stopping translation...',
+    'Stop requested. Cancelling translation request...'
+  );
+  activeTranslationAbortController.abort();
 }
 
 function handleAddNewLabel() {
@@ -1133,6 +1163,7 @@ elements.cancelValueDialog.addEventListener('click', closeValueDialog);
 elements.saveValueDialog.addEventListener('click', saveValueDialog);
 elements.labelPrefixInfoBtn.addEventListener('click', openLabelPrefixDialog);
 elements.closeLabelPrefixDialog.addEventListener('click', closeLabelPrefixDialog);
+elements.stopTranslationBtn.addEventListener('click', stopTranslation);
 elements.closeTranslationProgressBtn.addEventListener('click', closeTranslationProgressDialog);
 elements.labelPrefixDialog.addEventListener('click', (e) => {
   if (e.target === elements.labelPrefixDialog) {
