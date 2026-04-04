@@ -12,11 +12,13 @@ import org.springframework.http.MediaType;
 import org.springframework.boot.web.client.RestTemplateBuilder;
 import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.web.client.RestTemplate;
+import org.springframework.util.StreamUtils;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -244,6 +246,42 @@ class TranslationServiceTest {
         List<TranslationRow> rows = service.loadRows(null, "fr.json");
         assertEquals(1, rows.size());
         assertEquals("Приложи", rows.get(0).getEnglishReference());
+    }
+
+    @Test
+    void translateAndStoreSkipsBlankContentsInGoogleBatchRequests() throws Exception {
+        TranslationService service = createService("", false, "en", "bg", 50);
+        MockRestServiceServer server = bindMockServer(service);
+
+        String url = "https://translation.googleapis.com/v3/projects/dummy-project-id/locations/global:translateText";
+        server.expect(requestTo(url))
+                .andExpect(method(HttpMethod.POST))
+                .andExpect(request -> {
+                    JsonNode body = new ObjectMapper().readTree(StreamUtils.copyToString(request.getBody(), StandardCharsets.UTF_8));
+                    assertEquals(2, body.path("contents").size());
+                    assertEquals("Apply", body.path("contents").get(0).asText());
+                    assertEquals("Cancel", body.path("contents").get(1).asText());
+                })
+                .andRespond(withSuccess("""
+                        {
+                          "translations":[
+                            {"translatedText":"Приложи"},
+                            {"translatedText":"Откажи"}
+                          ]
+                        }
+                        """, MediaType.APPLICATION_JSON));
+
+        service.translateAndStore(null, "en.json", "bg", List.of(
+                new TranslationRow("b", "apply", "Apply", ""),
+                new TranslationRow("b", "empty", "", ""),
+                new TranslationRow("b", "cancel", "Cancel", "")
+        ));
+        server.verify();
+
+        JsonNode translated = new ObjectMapper().readTree(Files.readString(tempDir.resolve("bg.json")));
+        assertEquals("Приложи", translated.path("b").path("apply").asText());
+        assertEquals("", translated.path("b").path("empty").asText());
+        assertEquals("Откажи", translated.path("b").path("cancel").asText());
     }
 
     @Test
