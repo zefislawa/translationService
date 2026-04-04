@@ -202,6 +202,51 @@ class TranslationServiceTest {
     }
 
     @Test
+    void loadRowsUsesConfiguredReferenceLanguageFile() throws Exception {
+        TranslationService service = new TranslationService(
+                tempDir.toString(),
+                "",
+                "en",
+                "bg",
+                "dummy-project-id",
+                "global",
+                "general/translation-llm",
+                false,
+                "bg-terms",
+                50,
+                3,
+                10,
+                "en",
+                "bg",
+                "",
+                true,
+                true,
+                new ObjectMapper(),
+                new RestTemplateBuilder()
+        );
+
+        Files.writeString(tempDir.resolve("fr.json"), """
+                {
+                  "b" : {
+                    "apply" : "Appliquer"
+                  }
+                }
+                """);
+
+        Files.writeString(tempDir.resolve("bg.json"), """
+                {
+                  "b" : {
+                    "apply" : "Приложи"
+                  }
+                }
+                """);
+
+        List<TranslationRow> rows = service.loadRows(null, "fr.json");
+        assertEquals(1, rows.size());
+        assertEquals("Приложи", rows.get(0).getEnglishReference());
+    }
+
+    @Test
     void translateAndStoreWritesPreprocessingMetadataIncludingConfiguredRiskyTerms() throws Exception {
         Path riskyTermsFile = tempDir.resolve("risky-terms.txt");
         Files.writeString(riskyTermsFile, """

@@ -13,20 +13,37 @@ public class AppConfigController {
 
     private final String preferredTargetLanguage;
     private final String displayLanguageCode;
+    private final String referenceLanguageFile;
 
     public AppConfigController(
             @Value("${myapp.ui.preferredTargetLanguage:}") String preferredTargetLanguage,
-            @Value("${myapp.google.displayLanguageCode:}") String displayLanguageCode
+            @Value("${myapp.google.displayLanguageCode:}") String displayLanguageCode,
+            @Value("${myapp.referenceLanguageFile:en}") String referenceLanguageFile
     ) {
         this.preferredTargetLanguage = preferredTargetLanguage;
-        this.displayLanguageCode = displayLanguageCode;
+        this.displayLanguageCode = !displayLanguageCode.isBlank()
+                ? displayLanguageCode
+                : normalizeLanguageCode(referenceLanguageFile);
+        this.referenceLanguageFile = normalizeLanguageCode(referenceLanguageFile);
+    }
+
+    private String normalizeLanguageCode(String rawLanguageCode) {
+        if (rawLanguageCode == null || rawLanguageCode.isBlank()) {
+            return "en";
+        }
+
+        String normalized = rawLanguageCode.trim();
+        return normalized.toLowerCase().endsWith(".json")
+                ? normalized.substring(0, normalized.length() - ".json".length())
+                : normalized;
     }
 
     @GetMapping
     public Map<String, String> getConfig() {
         return Map.of(
                 "preferredTargetLanguage", preferredTargetLanguage,
-                "displayLanguageCode", displayLanguageCode
+                "displayLanguageCode", displayLanguageCode,
+                "referenceLanguageFile", referenceLanguageFile
         );
     }
 }

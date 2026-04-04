@@ -266,6 +266,27 @@
         </div>
     </div>
 
+    <div id="translationProgressDialog" class="dialog-overlay" aria-hidden="true">
+        <div class="dialog-content progress-dialog-content">
+            <div class="dialog-header">
+                <h4 class="dialog-title" id="translationProgressTitle">Translation in progress</h4>
+            </div>
+            <div class="dialog-body progress-dialog-body">
+                <p id="translationProgressStatusText" class="progress-status-text">Preparing translation...</p>
+                <div class="progress-track" role="progressbar" aria-label="Translation and validation progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+                    <div id="translationProgressBar" class="progress-bar"></div>
+                </div>
+                <div class="progress-log-panel">
+                    <p class="progress-log-title">Current task logs</p>
+                    <ul id="translationProgressLogs" class="progress-log-list"></ul>
+                </div>
+            </div>
+            <div class="dialog-footer">
+                <button type="button" class="btn btn-primary hidden" id="closeTranslationProgressBtn">Close</button>
+            </div>
+        </div>
+    </div>
+
     <script src="script.js"></script>
 </body>
 </html>

@@ -13,6 +13,7 @@ let compareSelectedKeys = new Set();
 let originalRowsSnapshot = new Map();
 let availableFiles = [];
 let mergedPayload = null;
+let translationProgressLogCount = 0;
 
 const elements = {
   successMessage: document.getElementById('successMessage'),
@@ -56,7 +57,13 @@ const elements = {
   mergeDeltaFile: document.getElementById('mergeDeltaFile'),
   runDeepMergeBtn: document.getElementById('runDeepMergeBtn'),
   downloadMergedBtn: document.getElementById('downloadMergedBtn'),
-  deepMergeOutput: document.getElementById('deepMergeOutput')
+  deepMergeOutput: document.getElementById('deepMergeOutput'),
+  translationProgressDialog: document.getElementById('translationProgressDialog'),
+  translationProgressTitle: document.getElementById('translationProgressTitle'),
+  translationProgressStatusText: document.getElementById('translationProgressStatusText'),
+  translationProgressBar: document.getElementById('translationProgressBar'),
+  translationProgressLogs: document.getElementById('translationProgressLogs'),
+  closeTranslationProgressBtn: document.getElementById('closeTranslationProgressBtn')
 };
 
 async function fetchFiles() {
@@ -754,13 +761,53 @@ function showSuccessMessage(message) {
   setTimeout(() => elements.successMessage.classList.add('hidden'), 5000);
 }
 
+function openTranslationProgressDialog(title) {
+  translationProgressLogCount = 0;
+  elements.translationProgressTitle.textContent = title;
+  elements.translationProgressStatusText.textContent = 'Preparing...';
+  elements.translationProgressBar.style.width = '0%';
+  elements.translationProgressBar.parentElement.setAttribute('aria-valuenow', '0');
+  elements.translationProgressLogs.innerHTML = '';
+  elements.closeTranslationProgressBtn.classList.add('hidden');
+  elements.translationProgressDialog.classList.add('show');
+  elements.translationProgressDialog.setAttribute('aria-hidden', 'false');
+}
+
+function appendTranslationProgressLog(logLine) {
+  translationProgressLogCount += 1;
+  const li = document.createElement('li');
+  li.textContent = `[${translationProgressLogCount}] ${logLine}`;
+  elements.translationProgressLogs.appendChild(li);
+  elements.translationProgressLogs.scrollTop = elements.translationProgressLogs.scrollHeight;
+}
+
+function updateTranslationProgress(percent, statusText, logLine) {
+  const normalizedPercent = Math.max(0, Math.min(100, Math.round(percent)));
+  elements.translationProgressStatusText.textContent = statusText;
+  elements.translationProgressBar.style.width = `${normalizedPercent}%`;
+  elements.translationProgressBar.parentElement.setAttribute('aria-valuenow', String(normalizedPercent));
+  if (logLine) {
+    appendTranslationProgressLog(logLine);
+  }
+}
+
+function completeTranslationProgress(successText, logLine) {
+  updateTranslationProgress(100, successText, logLine);
+  elements.closeTranslationProgressBtn.classList.remove('hidden');
+}
+
+function closeTranslationProgressDialog() {
+  elements.translationProgressDialog.classList.remove('show');
+  elements.translationProgressDialog.setAttribute('aria-hidden', 'true');
+}
+
 async function handleLoadFiles() {
   const previouslySelectedFile = elements.fileSelect.value || selectedFile;
 
   try {
     const uiConfig = await fetchUiConfig();
     preferredTargetLanguage = (uiConfig.preferredTargetLanguage || '').trim();
-    preferredDisplayLanguage = (uiConfig.displayLanguageCode || '').trim();
+    preferredDisplayLanguage = (uiConfig.referenceLanguageFile || uiConfig.displayLanguageCode || '').trim();
   } catch (error) {
     preferredTargetLanguage = '';
     preferredDisplayLanguage = '';
@@ -872,13 +919,27 @@ async function handleTranslate() {
     return;
   }
 
-  const result = await translateAndStore(targetLanguage);
+  openTranslationProgressDialog(`Translation and validation (${targetLanguage})`);
+  updateTranslationProgress(8, 'Preparing selected rows...', `Preparing ${selectedRows.length} selected rows.`);
+  updateTranslationProgress(25, 'Sending translation request...', `Calling translation service for ${selectedFile}.`);
 
-  await handleLoadFiles();
-  showSuccessMessage(
-    `Translation saved for ${targetLanguage}. ` +
-    `Successfully translated ${Number(result.textCount || 0)} labels/rows. File: ${result.outputFile}`
-  );
+  try {
+    const result = await translateAndStore(targetLanguage);
+    updateTranslationProgress(78, 'Validating translated file...', 'Translation completed. Validating placeholders and risky terms.');
+    await handleLoadFiles();
+    completeTranslationProgress(
+      `Completed successfully. ${Number(result.textCount || 0)} rows translated and validated.`,
+      `Saved file ${result.outputFile}. Validation report generated next to the translated file.`
+    );
+    showSuccessMessage(
+      `Translation saved for ${targetLanguage}. ` +
+      `Successfully translated ${Number(result.textCount || 0)} labels/rows. File: ${result.outputFile}`
+    );
+  } catch (error) {
+    updateTranslationProgress(100, 'Translation failed. Please review the error and try again.', `Error: ${error.message}`);
+    elements.closeTranslationProgressBtn.classList.remove('hidden');
+    throw error;
+  }
 }
 
 function handleAddNewLabel() {
@@ -1010,6 +1071,7 @@ elements.cancelValueDialog.addEventListener('click', closeValueDialog);
 elements.saveValueDialog.addEventListener('click', saveValueDialog);
 elements.labelPrefixInfoBtn.addEventListener('click', openLabelPrefixDialog);
 elements.closeLabelPrefixDialog.addEventListener('click', closeLabelPrefixDialog);
+elements.closeTranslationProgressBtn.addEventListener('click', closeTranslationProgressDialog);
 elements.labelPrefixDialog.addEventListener('click', (e) => {
   if (e.target === elements.labelPrefixDialog) {
     closeLabelPrefixDialog();
@@ -1025,6 +1087,8 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {
     if (elements.labelPrefixDialog.classList.contains('show')) {
       closeLabelPrefixDialog();
+    } else if (elements.translationProgressDialog.classList.contains('show') && !elements.closeTranslationProgressBtn.classList.contains('hidden')) {
+      closeTranslationProgressDialog();
     } else if (elements.valueDialog.classList.contains('show')) {
       closeValueDialog();
     }
