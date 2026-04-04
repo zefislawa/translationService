@@ -1214,7 +1214,8 @@ public class TranslationService {
 
     private GoogleCredentials loadGoogleCredentials() throws Exception {
         if (googleCredentialsPath != null && !googleCredentialsPath.isBlank()) {
-            Path credentialsPath = Path.of(googleCredentialsPath.trim()).toAbsolutePath().normalize();
+            String normalizedConfiguredPath = normalizeCredentialsPathValue(googleCredentialsPath);
+            Path credentialsPath = Path.of(normalizedConfiguredPath).toAbsolutePath().normalize();
             if (!Files.isRegularFile(credentialsPath)) {
                 throw new IllegalStateException("Google credentials file was not found at: " + credentialsPath);
             }
@@ -1223,6 +1224,42 @@ public class TranslationService {
             }
         }
         return GoogleCredentials.getApplicationDefault();
+    }
+
+    private String normalizeCredentialsPathValue(String configuredValue) {
+        String normalized = configuredValue == null ? "" : configuredValue.trim();
+        if (normalized.isEmpty()) {
+            return normalized;
+        }
+
+        normalized = stripOptionalAssignmentPrefix(normalized, "GOOGLE_APPLICATION_CREDENTIALS");
+        normalized = stripOptionalAssignmentPrefix(normalized, "myapp.google.credentialsPath");
+        normalized = stripOptionalAssignmentPrefix(normalized, "myapp.local.googleCredentialsPath");
+        normalized = stripMatchingQuotes(normalized);
+        return normalized.trim();
+    }
+
+    private String stripOptionalAssignmentPrefix(String rawValue, String propertyName) {
+        if (!rawValue.startsWith(propertyName)) {
+            return rawValue;
+        }
+        int separatorIndex = rawValue.indexOf('=');
+        if (separatorIndex < 0) {
+            return rawValue;
+        }
+        return rawValue.substring(separatorIndex + 1).trim();
+    }
+
+    private String stripMatchingQuotes(String rawValue) {
+        if (rawValue.length() < 2) {
+            return rawValue;
+        }
+        char first = rawValue.charAt(0);
+        char last = rawValue.charAt(rawValue.length() - 1);
+        if ((first == '"' && last == '"') || (first == '\'' && last == '\'')) {
+            return rawValue.substring(1, rawValue.length() - 1);
+        }
+        return rawValue;
     }
 
     private boolean tokenExpiringSoon(AccessToken token) {

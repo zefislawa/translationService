@@ -384,6 +384,35 @@ class TranslationServiceTest {
     }
 
     @Test
+    void normalizeCredentialsPathValueStripsAccidentalPropertyAssignments() throws Exception {
+        TranslationService service = createService("", false, "en", "bg", 50);
+        Method normalizeMethod = TranslationService.class.getDeclaredMethod("normalizeCredentialsPathValue", String.class);
+        normalizeMethod.setAccessible(true);
+
+        String normalizedLocalProperty = (String) normalizeMethod.invoke(
+                service,
+                "myapp.local.googleCredentialsPath=C:/Users/example/credentials.json"
+        );
+        assertEquals("C:/Users/example/credentials.json", normalizedLocalProperty);
+
+        String normalizedEnvProperty = (String) normalizeMethod.invoke(
+                service,
+                "GOOGLE_APPLICATION_CREDENTIALS=C:/Users/example/credentials.json"
+        );
+        assertEquals("C:/Users/example/credentials.json", normalizedEnvProperty);
+    }
+
+    @Test
+    void normalizeCredentialsPathValueStripsWrappingQuotes() throws Exception {
+        TranslationService service = createService("", false, "en", "bg", 50);
+        Method normalizeMethod = TranslationService.class.getDeclaredMethod("normalizeCredentialsPathValue", String.class);
+        normalizeMethod.setAccessible(true);
+
+        String normalized = (String) normalizeMethod.invoke(service, "\"C:/Users/example/credentials.json\"");
+        assertEquals("C:/Users/example/credentials.json", normalized);
+    }
+
+    @Test
     void flattenAndRebuildPreservesOriginalJsonStructure() throws Exception {
         TranslationService service = createService("", false, "en", "bg", 50);
         ObjectMapper objectMapper = new ObjectMapper();
