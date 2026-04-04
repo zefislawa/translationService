@@ -510,6 +510,12 @@ body {
     font-size: 14px;
 }
 
+.progress-eta-text {
+    color: #6b7280;
+    font-size: 12px;
+    margin-top: -6px;
+}
+
 .progress-track {
     width: 100%;
     height: 12px;

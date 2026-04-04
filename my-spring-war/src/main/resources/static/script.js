@@ -14,6 +14,7 @@ let originalRowsSnapshot = new Map();
 let availableFiles = [];
 let mergedPayload = null;
 let translationProgressLogCount = 0;
+let translationProgressState = null;
 
 const elements = {
   successMessage: document.getElementById('successMessage'),
@@ -61,6 +62,7 @@ const elements = {
   translationProgressDialog: document.getElementById('translationProgressDialog'),
   translationProgressTitle: document.getElementById('translationProgressTitle'),
   translationProgressStatusText: document.getElementById('translationProgressStatusText'),
+  translationProgressEtaText: document.getElementById('translationProgressEtaText'),
   translationProgressBar: document.getElementById('translationProgressBar'),
   translationProgressLogs: document.getElementById('translationProgressLogs'),
   closeTranslationProgressBtn: document.getElementById('closeTranslationProgressBtn')
@@ -761,16 +763,64 @@ function showSuccessMessage(message) {
   setTimeout(() => elements.successMessage.classList.add('hidden'), 5000);
 }
 
+function formatDuration(seconds) {
+  const normalizedSeconds = Math.max(0, Math.round(seconds));
+  const minutes = Math.floor(normalizedSeconds / 60);
+  const remainingSeconds = normalizedSeconds % 60;
+  if (minutes <= 0) {
+    return `${remainingSeconds}s`;
+  }
+  if (minutes < 60) {
+    return `${minutes}m ${String(remainingSeconds).padStart(2, '0')}s`;
+  }
+  const hours = Math.floor(minutes / 60);
+  const remainingMinutes = minutes % 60;
+  return `${hours}h ${String(remainingMinutes).padStart(2, '0')}m`;
+}
+
+function refreshTranslationEtaLabel() {
+  if (!translationProgressState || !elements.translationProgressEtaText) {
+    return;
+  }
+
+  if (translationProgressState.currentPercent >= 100) {
+    elements.translationProgressEtaText.textContent = 'Estimated time remaining: Completed';
+    return;
+  }
+
+  const now = Date.now();
+  const elapsedSeconds = (now - translationProgressState.startTimeMs) / 1000;
+  const effectiveRate = translationProgressState.currentPercent / Math.max(elapsedSeconds, 0.001);
+  if (effectiveRate <= 0) {
+    elements.translationProgressEtaText.textContent = 'Estimated time remaining: Calculating...';
+    return;
+  }
+
+  const estimatedSecondsRemaining = (100 - translationProgressState.currentPercent) / effectiveRate;
+  elements.translationProgressEtaText.textContent = `Estimated time remaining: ${formatDuration(estimatedSecondsRemaining)}`;
+}
+
 function openTranslationProgressDialog(title) {
+  const now = Date.now();
   translationProgressLogCount = 0;
+  translationProgressState = {
+    startTimeMs: now,
+    currentPercent: 0,
+    intervalId: null
+  };
   elements.translationProgressTitle.textContent = title;
   elements.translationProgressStatusText.textContent = 'Preparing...';
+  elements.translationProgressEtaText.textContent = 'Estimated time remaining: Calculating...';
   elements.translationProgressBar.style.width = '0%';
   elements.translationProgressBar.parentElement.setAttribute('aria-valuenow', '0');
   elements.translationProgressLogs.innerHTML = '';
   elements.closeTranslationProgressBtn.classList.add('hidden');
   elements.translationProgressDialog.classList.add('show');
   elements.translationProgressDialog.setAttribute('aria-hidden', 'false');
+
+  translationProgressState.intervalId = setInterval(() => {
+    refreshTranslationEtaLabel();
+  }, 1000);
 }
 
 function appendTranslationProgressLog(logLine) {
@@ -783,9 +833,13 @@ function appendTranslationProgressLog(logLine) {
 
 function updateTranslationProgress(percent, statusText, logLine) {
   const normalizedPercent = Math.max(0, Math.min(100, Math.round(percent)));
+  if (translationProgressState) {
+    translationProgressState.currentPercent = normalizedPercent;
+  }
   elements.translationProgressStatusText.textContent = statusText;
   elements.translationProgressBar.style.width = `${normalizedPercent}%`;
   elements.translationProgressBar.parentElement.setAttribute('aria-valuenow', String(normalizedPercent));
+  refreshTranslationEtaLabel();
   if (logLine) {
     appendTranslationProgressLog(logLine);
   }
@@ -793,10 +847,18 @@ function updateTranslationProgress(percent, statusText, logLine) {
 
 function completeTranslationProgress(successText, logLine) {
   updateTranslationProgress(100, successText, logLine);
+  if (translationProgressState && translationProgressState.intervalId) {
+    clearInterval(translationProgressState.intervalId);
+    translationProgressState.intervalId = null;
+  }
   elements.closeTranslationProgressBtn.classList.remove('hidden');
 }
 
 function closeTranslationProgressDialog() {
+  if (translationProgressState && translationProgressState.intervalId) {
+    clearInterval(translationProgressState.intervalId);
+  }
+  translationProgressState = null;
   elements.translationProgressDialog.classList.remove('show');
   elements.translationProgressDialog.setAttribute('aria-hidden', 'true');
 }
