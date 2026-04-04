@@ -12,8 +12,8 @@ import org.springframework.http.MediaType;
 import org.springframework.boot.web.client.RestTemplateBuilder;
 import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.web.client.RestTemplate;
-import org.springframework.util.StreamUtils;
 
+import java.io.ByteArrayOutputStream;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.nio.file.Files;
@@ -257,7 +257,8 @@ class TranslationServiceTest {
         server.expect(requestTo(url))
                 .andExpect(method(HttpMethod.POST))
                 .andExpect(request -> {
-                    JsonNode body = new ObjectMapper().readTree(StreamUtils.copyToString(request.getBody(), StandardCharsets.UTF_8));
+                    ByteArrayOutputStream requestBody = (ByteArrayOutputStream) request.getBody();
+                    JsonNode body = new ObjectMapper().readTree(requestBody.toString(StandardCharsets.UTF_8));
                     assertEquals(2, body.path("contents").size());
                     assertEquals("Apply", body.path("contents").get(0).asText());
                     assertEquals("Cancel", body.path("contents").get(1).asText());
