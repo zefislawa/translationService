@@ -671,9 +671,23 @@ public class TranslationService {
         for (int start = 0; start < items.size(); start += googleBatchSize) {
             int end = Math.min(start + googleBatchSize, items.size());
             List<PreparedTranslationItem> batchItems = items.subList(start, end);
-            List<String> contents = batchItems.stream()
-                    .map(PreparedTranslationItem::protectedText)
-                    .toList();
+            List<Integer> translatableIndexes = new ArrayList<>(batchItems.size());
+            List<String> contents = new ArrayList<>(batchItems.size());
+            List<String> batchTranslations = new ArrayList<>(Collections.nCopies(batchItems.size(), null));
+            for (int i = 0; i < batchItems.size(); i++) {
+                String protectedText = batchItems.get(i).protectedText();
+                if (protectedText == null || protectedText.isBlank()) {
+                    batchTranslations.set(i, Objects.requireNonNullElse(protectedText, ""));
+                    continue;
+                }
+                translatableIndexes.add(i);
+                contents.add(protectedText);
+            }
+
+            if (contents.isEmpty()) {
+                allTranslations.addAll(batchTranslations);
+                continue;
+            }
             GoogleTranslateTextRequest body = new GoogleTranslateTextRequest(
                     contents,
                     sourceLanguage,
@@ -719,7 +733,10 @@ public class TranslationService {
             if (selectedTranslations.size() != contents.size()) {
                 throw new IllegalStateException("Google Translate returned an unexpected number of translated strings");
             }
-            allTranslations.addAll(selectedTranslations);
+            for (int i = 0; i < translatableIndexes.size(); i++) {
+                batchTranslations.set(translatableIndexes.get(i), selectedTranslations.get(i));
+            }
+            allTranslations.addAll(batchTranslations);
         }
         return allTranslations;
     }
