@@ -32,6 +32,8 @@ const elements = {
   selectAllRows: document.getElementById('selectAllRows'),
   glossaryFileSelect: document.getElementById('glossaryFileSelect'),
   syncGlossaryBtn: document.getElementById('syncGlossaryBtn'),
+  adaptiveDatasetFileSelect: document.getElementById('adaptiveDatasetFileSelect'),
+  syncAdaptiveDatasetBtn: document.getElementById('syncAdaptiveDatasetBtn'),
   targetLanguageSelect: document.getElementById('targetLanguage'),
   translateBtn: document.getElementById('translateBtn'),
   translationForm: document.getElementById('translationForm'),
@@ -96,6 +98,12 @@ async function fetchGlossaryFiles() {
   return res.json();
 }
 
+async function fetchAdaptiveDatasetFiles() {
+  const res = await fetch('/api/translations/admin/adaptive-dataset/files');
+  if (!res.ok) throw new Error(`Unable to load adaptive dataset files (HTTP ${res.status})`);
+  return res.json();
+}
+
 async function synchronizeGlossary(glossaryFilePath, sourceLanguage, targetLanguage) {
   const res = await fetch('/api/translations/admin/glossary/sync', {
     method: 'POST',
@@ -110,6 +118,24 @@ async function synchronizeGlossary(glossaryFilePath, sourceLanguage, targetLangu
   if (!res.ok) {
     const errorText = await res.text();
     throw new Error(errorText || `Unable to synchronize glossary (HTTP ${res.status})`);
+  }
+  return res.json();
+}
+
+async function synchronizeAdaptiveDataset(tsvFilePath, sourceLanguage, targetLanguage) {
+  const res = await fetch('/api/translations/admin/adaptive-dataset/sync', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      tsvFilePath,
+      sourceLanguage,
+      targetLanguage
+    })
+  });
+
+  if (!res.ok) {
+    const errorText = await res.text();
+    throw new Error(errorText || `Unable to synchronize adaptive dataset (HTTP ${res.status})`);
   }
   return res.json();
 }
@@ -271,6 +297,27 @@ function renderGlossaryFiles(files) {
     option.textContent = fileName;
     elements.glossaryFileSelect.appendChild(option);
   });
+}
+
+function renderAdaptiveDatasetFiles(files, configuredFile) {
+  elements.adaptiveDatasetFileSelect.innerHTML = '';
+  if (!files || files.length === 0) {
+    const option = document.createElement('option');
+    option.value = '';
+    option.textContent = 'No dataset files found';
+    elements.adaptiveDatasetFileSelect.appendChild(option);
+    return;
+  }
+
+  files.forEach((fileName) => {
+    const option = document.createElement('option');
+    option.value = fileName;
+    option.textContent = fileName;
+    elements.adaptiveDatasetFileSelect.appendChild(option);
+  });
+
+  const configured = (configuredFile || '').trim();
+  elements.adaptiveDatasetFileSelect.value = files.includes(configured) ? configured : files[0];
 }
 
 function detectSourceLanguageFromSelectedFile(fileName) {
@@ -945,6 +992,13 @@ async function handleLoadFiles() {
     console.warn(error);
     renderGlossaryFiles([]);
   }
+  try {
+    const adaptiveDatasetFileData = await fetchAdaptiveDatasetFiles();
+    renderAdaptiveDatasetFiles(adaptiveDatasetFileData.files || [], adaptiveDatasetFileData.configuredFile || '');
+  } catch (error) {
+    console.warn(error);
+    renderAdaptiveDatasetFiles([], '');
+  }
 
   elements.fileSelect.innerHTML = '';
   files.forEach((name) => {
@@ -1105,6 +1159,32 @@ async function handleSyncGlossary() {
   );
 }
 
+async function handleSyncAdaptiveDataset() {
+  const tsvFilePath = elements.adaptiveDatasetFileSelect.value;
+  if (!tsvFilePath) {
+    alert('Please select an adaptive dataset TSV file.');
+    return;
+  }
+
+  const sourceLanguage = detectSourceLanguageFromSelectedFile(selectedFile || elements.fileSelect.value);
+  if (!sourceLanguage) {
+    alert('Please select a translation file so the source language can be inferred.');
+    return;
+  }
+
+  const selectedTargetLanguage = elements.targetLanguageSelect.value;
+  if (!selectedTargetLanguage) {
+    alert('Please select a target language before syncing dataset.');
+    return;
+  }
+
+  const result = await synchronizeAdaptiveDataset(tsvFilePath, sourceLanguage, selectedTargetLanguage);
+  showSuccessMessage(
+    `Dataset synchronized for ${result.sourceLanguage} → ${result.targetLanguage}. ` +
+    `Active dataset: ${result.dataset}. Import status: ${result.importStatus}.`
+  );
+}
+
 function stopTranslation() {
   if (!activeTranslationAbortController) {
     return;
@@ -1218,6 +1298,7 @@ elements.nextBtn.addEventListener('click', () => {
 });
 elements.selectAllRows.addEventListener('change', handleSelectAllRows);
 elements.syncGlossaryBtn.addEventListener('click', () => handleSyncGlossary().catch((e) => alert(e.message)));
+elements.syncAdaptiveDatasetBtn.addEventListener('click', () => handleSyncAdaptiveDataset().catch((e) => alert(e.message)));
 elements.targetLanguageSelect.addEventListener('change', () => {
   targetLanguage = elements.targetLanguageSelect.value;
 });

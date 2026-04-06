@@ -113,6 +113,12 @@
                         </select>
                     </div>
                     <div class="form-group">
+                        <label class="form-label">Adaptive dataset TSV</label>
+                        <select id="adaptiveDatasetFileSelect" class="select-input">
+                            <option value="">No dataset files found</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
                         <label class="form-label">Select target language</label>
                         <select id="targetLanguage" class="select-input">
                             <option value="">Loading supported languages...</option>
@@ -121,6 +127,10 @@
                     <div class="form-group">
                         <label class="form-label invisible">Action</label>
                         <button type="button" class="btn btn-outline" id="syncGlossaryBtn">Sync glossary</button>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label invisible">Action</label>
+                        <button type="button" class="btn btn-outline" id="syncAdaptiveDatasetBtn">Sync dataset</button>
                     </div>
                     <div class="form-group">
                         <label class="form-label invisible">Action</label>

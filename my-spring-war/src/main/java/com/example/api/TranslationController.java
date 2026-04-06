@@ -53,6 +53,15 @@ public class TranslationController {
         return response;
     }
 
+    @GetMapping("/admin/adaptive-dataset/files")
+    public Map<String, Object> listAdaptiveDatasetFiles() throws Exception {
+        List<String> files = translationService.listAdaptiveDatasetFiles();
+        Map<String, Object> response = new LinkedHashMap<>();
+        response.put("files", files);
+        response.put("configuredFile", translationService.configuredAdaptiveDatasetFileName());
+        return response;
+    }
+
     @PostMapping("/load")
     public List<TranslationRow> loadRows(@RequestBody TranslationFileLoadRequest request) throws Exception {
         return translationService.loadRows(request.getPath(), request.getFileName());
