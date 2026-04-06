@@ -74,6 +74,10 @@ public class TranslationService {
     private final String googleGlossaryBucket;
     private final String googleGlossaryObjectPrefix;
     private final String googleGlossaryResourceTemplate;
+    private final String googleAdaptiveDatasetFile;
+    private final String googleAdaptiveDatasetBucket;
+    private final String googleAdaptiveDatasetObjectPrefix;
+    private final String googleAdaptiveDatasetResourceTemplate;
     private final int googleBatchSize;
     private final int googleRetryAttempts;
     private final long googleRetryBackoffMs;
@@ -83,6 +87,7 @@ public class TranslationService {
     private final boolean placeholderProtectionEnabled;
     private final boolean validationEnabled;
     private final Map<String, String> activeGlossariesByLanguagePair = new ConcurrentHashMap<>();
+    private final Map<String, String> activeAdaptiveDatasetsByLanguagePair = new ConcurrentHashMap<>();
     private GoogleCredentials googleCredentials;
     private AccessToken cachedAccessToken;
     private static final Pattern PLACEHOLDER_PATTERN = Pattern.compile(
@@ -109,6 +114,10 @@ public class TranslationService {
             @Value("${myapp.google.glossaryBucket:}") String googleGlossaryBucket,
             @Value("${myapp.google.glossaryObjectPrefix:}") String googleGlossaryObjectPrefix,
             @Value("${myapp.google.glossaryResourceTemplate:}") String googleGlossaryResourceTemplate,
+            @Value("${myapp.google.adaptiveDatasetFile:}") String googleAdaptiveDatasetFile,
+            @Value("${myapp.google.adaptiveDatasetBucket:}") String googleAdaptiveDatasetBucket,
+            @Value("${myapp.google.adaptiveDatasetObjectPrefix:}") String googleAdaptiveDatasetObjectPrefix,
+            @Value("${myapp.google.adaptiveDatasetResourceTemplate:}") String googleAdaptiveDatasetResourceTemplate,
             @Value("${myapp.google.batchSize:50}") int googleBatchSize,
             @Value("${myapp.google.retryAttempts:3}") int googleRetryAttempts,
             @Value("${myapp.google.retryBackoffMs:500}") long googleRetryBackoffMs,
@@ -133,6 +142,10 @@ public class TranslationService {
         this.googleGlossaryBucket = googleGlossaryBucket;
         this.googleGlossaryObjectPrefix = googleGlossaryObjectPrefix;
         this.googleGlossaryResourceTemplate = googleGlossaryResourceTemplate;
+        this.googleAdaptiveDatasetFile = googleAdaptiveDatasetFile;
+        this.googleAdaptiveDatasetBucket = googleAdaptiveDatasetBucket;
+        this.googleAdaptiveDatasetObjectPrefix = googleAdaptiveDatasetObjectPrefix;
+        this.googleAdaptiveDatasetResourceTemplate = googleAdaptiveDatasetResourceTemplate;
         this.googleBatchSize = googleBatchSize;
         this.googleRetryAttempts = googleRetryAttempts;
         this.googleRetryBackoffMs = googleRetryBackoffMs;
@@ -682,15 +695,17 @@ public class TranslationService {
         return result;
     }
 
-    private List<String> callGoogleTranslationLlm(
+    private GoogleTranslationBatchResult callGoogleTranslationLlm(
             String sourceLanguage,
             String targetLanguage,
             List<PreparedTranslationItem> items
     ) {
         requireGoogleProjectId();
 
+        String adaptiveDataset = resolveAdaptiveDataset(sourceLanguage, targetLanguage);
+        boolean useAdaptiveDataset = adaptiveDataset != null && !adaptiveDataset.isBlank();
         String endpoint = "https://translation.googleapis.com/v3/projects/" + googleProjectId
-                + "/locations/" + googleLocation + ":translateText";
+                + "/locations/" + googleLocation + (useAdaptiveDataset ? ":adaptiveMtTranslate" : ":translateText");
         String url = UriComponentsBuilder.fromHttpUrl(endpoint).toUriString();
 
         List<String> allTranslations = new ArrayList<>(items.size());
@@ -726,6 +741,7 @@ public class TranslationService {
                     headers,
                     sourceLanguage,
                     targetLanguage,
+                    adaptiveDataset,
                     contents,
                     start,
                     end
@@ -738,7 +754,10 @@ public class TranslationService {
             }
             allTranslations.addAll(batchTranslations);
         }
-        return allTranslations;
+        String routeUsed = useAdaptiveDataset
+                ? "google-translation-advanced/adaptiveMtTranslate"
+                : "google-translation-advanced/translateText/translation-llm";
+        return new GoogleTranslationBatchResult(allTranslations, routeUsed);
     }
 
     private List<String> translateContentsWithAdaptiveSplitting(
@@ -746,18 +765,21 @@ public class TranslationService {
             HttpHeaders headers,
             String sourceLanguage,
             String targetLanguage,
+            String adaptiveDataset,
             List<String> contents,
             int start,
             int end
     ) {
-        GoogleTranslateTextRequest body = new GoogleTranslateTextRequest(
-                contents,
-                sourceLanguage,
-                targetLanguage,
-                "text/plain",
-                googleTranslationModel,
-                resolveGlossaryConfig(sourceLanguage, targetLanguage)
-        );
+        Object body = (adaptiveDataset != null && !adaptiveDataset.isBlank())
+                ? new GoogleAdaptiveMtTranslateRequest(contents, adaptiveDataset)
+                : new GoogleTranslateTextRequest(
+                        contents,
+                        sourceLanguage,
+                        targetLanguage,
+                        "text/plain",
+                        googleTranslationModel,
+                        resolveGlossaryConfig(sourceLanguage, targetLanguage)
+                );
         try {
             ResponseEntity<GoogleTranslateTextResponse> response = executeTranslateBatchWithRetry(url, body, headers, start, end);
             GoogleTranslateTextResponse responseBody = response.getBody();
@@ -782,9 +804,9 @@ public class TranslationService {
                 log.warn("Translation batch range=[{}, {}) failed with status={}; retrying as two sub-batches: [{}, {}) and [{}, {})",
                         start, end, statusCode, start, splitPoint, splitPoint, end);
                 List<String> firstHalf = translateContentsWithAdaptiveSplitting(
-                        url, headers, sourceLanguage, targetLanguage, contents.subList(0, middle), start, splitPoint);
+                        url, headers, sourceLanguage, targetLanguage, adaptiveDataset, contents.subList(0, middle), start, splitPoint);
                 List<String> secondHalf = translateContentsWithAdaptiveSplitting(
-                        url, headers, sourceLanguage, targetLanguage, contents.subList(middle, contents.size()), splitPoint, end);
+                        url, headers, sourceLanguage, targetLanguage, adaptiveDataset, contents.subList(middle, contents.size()), splitPoint, end);
                 List<String> merged = new ArrayList<>(contents.size());
                 merged.addAll(firstHalf);
                 merged.addAll(secondHalf);
@@ -795,7 +817,8 @@ public class TranslationService {
     }
 
     private List<TranslatedItemResult> translateByRouteV1(String sourceLanguage, String targetLanguage, List<PreparedTranslationItem> items) {
-        List<String> translatedTexts = callGoogleTranslationLlm(sourceLanguage, targetLanguage, items);
+        GoogleTranslationBatchResult translationBatchResult = callGoogleTranslationLlm(sourceLanguage, targetLanguage, items);
+        List<String> translatedTexts = translationBatchResult.translatedTexts();
         if (translatedTexts.size() != items.size()) {
             throw new IllegalStateException("Translation route v1 returned an unexpected number of translated strings");
         }
@@ -807,7 +830,7 @@ public class TranslationService {
                     item.item().index(),
                     item.item().fullKey(),
                     translatedTexts.get(i),
-                    "google-translation-advanced/translateText/translation-llm",
+                    translationBatchResult.routeUsed(),
                     item.metadata().risky(),
                     item.metadata().riskReason()
             ));
@@ -819,7 +842,7 @@ public class TranslationService {
 
     private ResponseEntity<GoogleTranslateTextResponse> executeTranslateBatchWithRetry(
             String url,
-            GoogleTranslateTextRequest body,
+            Object body,
             HttpHeaders headers,
             int start,
             int end
@@ -1265,6 +1288,32 @@ public class TranslationService {
         return glossaryResourceName;
     }
 
+    public String synchronizeAdaptiveDataset(String tsvFilePathOrName, String sourceLanguage, String targetLanguage) throws Exception {
+        requireAdaptiveDatasetAutomationConfigured();
+        String normalizedSourceLanguage = normalizeLanguageCodeOrThrow(sourceLanguage, "sourceLanguage");
+        String normalizedTargetLanguage = normalizeLanguageCodeOrThrow(targetLanguage, "targetLanguage");
+        if (normalizedSourceLanguage.equals(normalizedTargetLanguage)) {
+            throw new IllegalArgumentException("sourceLanguage and targetLanguage must be different");
+        }
+
+        Path adaptiveDatasetFile = resolveAdaptiveDatasetTsvFile(tsvFilePathOrName);
+        validateAdaptiveDatasetTsv(adaptiveDatasetFile);
+
+        String datasetResourceName = buildAdaptiveDatasetResourceName(normalizedSourceLanguage, normalizedTargetLanguage);
+        String gcsUri = uploadAdaptiveDatasetTsvToGcs(adaptiveDatasetFile, normalizedSourceLanguage, normalizedTargetLanguage);
+        createAdaptiveDatasetIfMissing(datasetResourceName, normalizedSourceLanguage, normalizedTargetLanguage);
+        importAdaptiveDatasetTsv(datasetResourceName, gcsUri, adaptiveDatasetFile.getFileName().toString());
+
+        String pairKey = languagePairKey(normalizedSourceLanguage, normalizedTargetLanguage);
+        activeAdaptiveDatasetsByLanguagePair.put(pairKey, datasetResourceName);
+        log.info("Activated adaptive dataset {} for language pair {}", datasetResourceName, pairKey);
+        return datasetResourceName;
+    }
+
+    private String resolveAdaptiveDataset(String sourceLanguage, String targetLanguage) {
+        return activeAdaptiveDatasetsByLanguagePair.get(languagePairKey(sourceLanguage, targetLanguage));
+    }
+
     private GoogleGlossaryConfig resolveGlossaryConfig(String sourceLanguage, String targetLanguage) {
         if (!googleGlossaryEnabled) {
             return null;
@@ -1297,6 +1346,16 @@ public class TranslationService {
         }
     }
 
+    private void requireAdaptiveDatasetAutomationConfigured() {
+        requireGoogleProjectId();
+        if (googleLocation == null || googleLocation.isBlank()) {
+            throw new IllegalStateException("Google location is missing. Configure myapp.google.location");
+        }
+        if (googleAdaptiveDatasetBucket == null || googleAdaptiveDatasetBucket.isBlank()) {
+            throw new IllegalStateException("Adaptive dataset automation requires myapp.google.adaptiveDatasetBucket");
+        }
+    }
+
     private String normalizeLanguageCodeOrThrow(String languageCode, String fieldName) {
         if (languageCode == null || languageCode.isBlank()) {
             throw new IllegalArgumentException(fieldName + " is required");
@@ -1323,6 +1382,25 @@ public class TranslationService {
         }
         if (!Files.isRegularFile(candidatePath)) {
             throw new IllegalArgumentException("Glossary CSV file not found: " + candidatePath);
+        }
+        return candidatePath;
+    }
+
+    private Path resolveAdaptiveDatasetTsvFile(String adaptiveDatasetFilePathOrName) throws Exception {
+        String configuredOrRequested = adaptiveDatasetFilePathOrName;
+        if (configuredOrRequested == null || configuredOrRequested.isBlank()) {
+            configuredOrRequested = googleAdaptiveDatasetFile;
+        }
+        if (configuredOrRequested == null || configuredOrRequested.isBlank()) {
+            throw new IllegalArgumentException("tsvFilePath is required or configure myapp.google.adaptiveDatasetFile");
+        }
+
+        Path candidatePath = Path.of(configuredOrRequested.trim());
+        if (!candidatePath.isAbsolute()) {
+            candidatePath = resolveDataDir(null).resolve(candidatePath).normalize();
+        }
+        if (!Files.isRegularFile(candidatePath)) {
+            throw new IllegalArgumentException("Adaptive dataset TSV file not found: " + candidatePath);
         }
         return candidatePath;
     }
@@ -1368,6 +1446,32 @@ public class TranslationService {
         }
     }
 
+    private void validateAdaptiveDatasetTsv(Path tsvFile) throws Exception {
+        List<String> lines = Files.readAllLines(tsvFile, StandardCharsets.UTF_8);
+        if (lines.isEmpty()) {
+            throw new IllegalArgumentException("Adaptive dataset TSV is empty: " + tsvFile);
+        }
+
+        int validRows = 0;
+        for (int i = 0; i < lines.size(); i++) {
+            String line = lines.get(i);
+            if (line == null || line.isBlank()) {
+                continue;
+            }
+            String[] columns = line.split("\\t", -1);
+            if (columns.length != 2) {
+                throw new IllegalArgumentException("Adaptive dataset TSV row " + (i + 1) + " must contain exactly 2 tab-separated columns");
+            }
+            if (columns[0].trim().isEmpty() || columns[1].trim().isEmpty()) {
+                throw new IllegalArgumentException("Adaptive dataset TSV row " + (i + 1) + " contains empty columns");
+            }
+            validRows++;
+        }
+        if (validRows == 0) {
+            throw new IllegalArgumentException("Adaptive dataset TSV contains no valid rows: " + tsvFile);
+        }
+    }
+
     private String uploadGlossaryCsvToGcs(Path glossaryFile, String sourceLanguage, String targetLanguage) throws Exception {
         String objectPathPrefix = normalizeGcsObjectPrefix();
         String objectName = objectPathPrefix
@@ -1389,6 +1493,27 @@ public class TranslationService {
         return "gs://" + googleGlossaryBucket + "/" + objectName;
     }
 
+    private String uploadAdaptiveDatasetTsvToGcs(Path tsvFile, String sourceLanguage, String targetLanguage) throws Exception {
+        String objectPathPrefix = normalizeAdaptiveDatasetGcsObjectPrefix();
+        String objectName = objectPathPrefix
+                + sourceLanguage + "-" + targetLanguage + "/"
+                + System.currentTimeMillis() + "-" + tsvFile.getFileName();
+        String endpoint = UriComponentsBuilder
+                .fromHttpUrl("https://storage.googleapis.com/upload/storage/v1/b/" + googleAdaptiveDatasetBucket + "/o")
+                .queryParam("uploadType", "media")
+                .queryParam("name", objectName)
+                .build()
+                .encode()
+                .toUriString();
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.valueOf("text/tab-separated-values; charset=UTF-8"));
+        headers.setBearerAuth(resolveAccessTokenValue());
+        HttpEntity<byte[]> request = new HttpEntity<>(Files.readAllBytes(tsvFile), headers);
+        restTemplate.postForEntity(endpoint, request, Object.class);
+        return "gs://" + googleAdaptiveDatasetBucket + "/" + objectName;
+    }
+
     private String normalizeGcsObjectPrefix() {
         if (googleGlossaryObjectPrefix == null || googleGlossaryObjectPrefix.isBlank()) {
             return "";
@@ -1401,6 +1526,119 @@ public class TranslationService {
             normalized = normalized + "/";
         }
         return normalized;
+    }
+
+    private String normalizeAdaptiveDatasetGcsObjectPrefix() {
+        if (googleAdaptiveDatasetObjectPrefix == null || googleAdaptiveDatasetObjectPrefix.isBlank()) {
+            return "";
+        }
+        String normalized = googleAdaptiveDatasetObjectPrefix.trim().replace('\\', '/');
+        if (normalized.startsWith("/")) {
+            normalized = normalized.substring(1);
+        }
+        if (!normalized.isEmpty() && !normalized.endsWith("/")) {
+            normalized = normalized + "/";
+        }
+        return normalized;
+    }
+
+    private void createAdaptiveDatasetIfMissing(String datasetResourceName, String sourceLanguage, String targetLanguage) {
+        if (adaptiveDatasetExists(datasetResourceName)) {
+            return;
+        }
+
+        String parent = "projects/" + googleProjectId + "/locations/" + googleLocation;
+        String createEndpoint = "https://translation.googleapis.com/v3/" + parent + "/adaptiveMtDatasets";
+        String datasetId = datasetResourceName.substring(datasetResourceName.lastIndexOf('/') + 1);
+        String createUrl = UriComponentsBuilder.fromHttpUrl(createEndpoint)
+                .queryParam("adaptiveMtDatasetId", datasetId)
+                .toUriString();
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        headers.setBearerAuth(resolveAccessTokenValue());
+
+        GoogleAdaptiveDatasetCreateRequest requestBody = new GoogleAdaptiveDatasetCreateRequest(
+                datasetResourceName,
+                sourceLanguage,
+                targetLanguage
+        );
+
+        restTemplate.postForEntity(createUrl, new HttpEntity<>(requestBody, headers), Object.class);
+        waitForAdaptiveDatasetAvailability(datasetResourceName);
+    }
+
+    private boolean adaptiveDatasetExists(String datasetResourceName) {
+        HttpHeaders headers = new HttpHeaders();
+        headers.setBearerAuth(resolveAccessTokenValue());
+        String getUrl = "https://translation.googleapis.com/v3/" + datasetResourceName;
+        try {
+            restTemplate.exchange(
+                    getUrl,
+                    org.springframework.http.HttpMethod.GET,
+                    new HttpEntity<>(headers),
+                    Object.class
+            );
+            return true;
+        } catch (HttpStatusCodeException ex) {
+            if (ex.getStatusCode().value() == 404) {
+                return false;
+            }
+            throw ex;
+        }
+    }
+
+    private void waitForAdaptiveDatasetAvailability(String datasetResourceName) {
+        for (int attempt = 0; attempt < 30; attempt++) {
+            if (adaptiveDatasetExists(datasetResourceName)) {
+                return;
+            }
+            sleepQuietly(1000L);
+        }
+        throw new IllegalStateException("Timed out waiting for adaptive dataset creation: " + datasetResourceName);
+    }
+
+    private void importAdaptiveDatasetTsv(String datasetResourceName, String gcsUri, String fileDisplayName) {
+        String importUrl = "https://translation.googleapis.com/v3/" + datasetResourceName + ":importAdaptiveMtFile";
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        headers.setBearerAuth(resolveAccessTokenValue());
+
+        GoogleAdaptiveDatasetImportRequest requestBody = new GoogleAdaptiveDatasetImportRequest(
+                new GoogleAdaptiveDatasetFileInputSource(
+                        new GoogleAdaptiveDatasetGcsInputSource(gcsUri),
+                        fileDisplayName
+                )
+        );
+
+        restTemplate.postForEntity(importUrl, new HttpEntity<>(requestBody, headers), Object.class);
+        waitForAdaptiveMtFileImport(datasetResourceName, fileDisplayName);
+    }
+
+    private void waitForAdaptiveMtFileImport(String datasetResourceName, String fileDisplayName) {
+        String listUrl = "https://translation.googleapis.com/v3/" + datasetResourceName + "/adaptiveMtFiles";
+        HttpHeaders headers = new HttpHeaders();
+        headers.setBearerAuth(resolveAccessTokenValue());
+
+        for (int attempt = 0; attempt < 30; attempt++) {
+            ResponseEntity<GoogleAdaptiveMtFilesListResponse> response = restTemplate.exchange(
+                    listUrl,
+                    org.springframework.http.HttpMethod.GET,
+                    new HttpEntity<>(headers),
+                    GoogleAdaptiveMtFilesListResponse.class
+            );
+            GoogleAdaptiveMtFilesListResponse body = response.getBody();
+            if (body != null && body.adaptiveMtFiles() != null) {
+                boolean found = body.adaptiveMtFiles().stream()
+                        .anyMatch(file -> file.displayName() != null && file.displayName().equals(fileDisplayName));
+                if (found) {
+                    return;
+                }
+            }
+            sleepQuietly(1000L);
+        }
+        throw new IllegalStateException("Timed out waiting for adaptive dataset import result: " + datasetResourceName);
     }
 
     private void recreateGlossaryResource(
@@ -1504,6 +1742,21 @@ public class TranslationService {
             throw new IllegalStateException("Resolved glossary id is empty. Check myapp.google.glossaryResourceTemplate");
         }
         return "projects/" + googleProjectId + "/locations/" + googleLocation + "/glossaries/" + glossaryId;
+    }
+
+    private String buildAdaptiveDatasetResourceName(String sourceLanguage, String targetLanguage) {
+        String template = (googleAdaptiveDatasetResourceTemplate == null || googleAdaptiveDatasetResourceTemplate.isBlank())
+                ? "app-adaptive-{source}-{target}"
+                : googleAdaptiveDatasetResourceTemplate.trim();
+        String datasetId = template
+                .replace("{source}", sourceLanguage)
+                .replace("{target}", targetLanguage)
+                .replaceAll("[^a-zA-Z0-9_-]", "-")
+                .toLowerCase(Locale.ROOT);
+        if (datasetId.isBlank()) {
+            throw new IllegalStateException("Resolved adaptive dataset id is empty. Check myapp.google.adaptiveDatasetResourceTemplate");
+        }
+        return "projects/" + googleProjectId + "/locations/" + googleLocation + "/adaptiveMtDatasets/" + datasetId;
     }
 
     private String languagePairKey(String sourceLanguage, String targetLanguage) {
@@ -1750,6 +2003,22 @@ public class TranslationService {
     private record GoogleGlossaryConfig(String glossary) {
     }
 
+    private record GoogleAdaptiveMtTranslateRequest(
+            List<String> content,
+            String dataset,
+            String mimeType
+    ) {
+        private GoogleAdaptiveMtTranslateRequest(List<String> content, String dataset) {
+            this(content, dataset, "text/plain");
+        }
+    }
+
+    private record GoogleTranslationBatchResult(
+            List<String> translatedTexts,
+            String routeUsed
+    ) {
+    }
+
     private record GoogleGlossaryCreateRequest(GoogleGlossaryDefinition glossary) {
     }
 
@@ -1789,6 +2058,33 @@ public class TranslationService {
     }
 
     private record GoogleTextTranslation(String translatedText) {
+    }
+
+    private record GoogleAdaptiveDatasetCreateRequest(
+            String name,
+            String sourceLanguageCode,
+            String targetLanguageCode
+    ) {
+    }
+
+    private record GoogleAdaptiveDatasetImportRequest(
+            GoogleAdaptiveDatasetFileInputSource inputSource
+    ) {
+    }
+
+    private record GoogleAdaptiveDatasetFileInputSource(
+            GoogleAdaptiveDatasetGcsInputSource gcsInputSource,
+            String displayName
+    ) {
+    }
+
+    private record GoogleAdaptiveDatasetGcsInputSource(String inputUri) {
+    }
+
+    private record GoogleAdaptiveMtFilesListResponse(List<GoogleAdaptiveMtFile> adaptiveMtFiles) {
+    }
+
+    private record GoogleAdaptiveMtFile(String displayName) {
     }
 
     private record GoogleSupportedLanguagesResponse(List<GoogleSupportedLanguage> languages) {

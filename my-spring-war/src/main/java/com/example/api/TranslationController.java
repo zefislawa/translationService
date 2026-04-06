@@ -8,6 +8,8 @@ import com.example.api.dto.TranslationExportResult;
 import com.example.api.dto.TranslationFileLoadRequest;
 import com.example.api.dto.GlossarySyncRequest;
 import com.example.api.dto.GlossarySyncResponse;
+import com.example.api.dto.AdaptiveDatasetSyncRequest;
+import com.example.api.dto.AdaptiveDatasetSyncResponse;
 import com.example.api.dto.TranslationSaveRequest;
 import com.example.api.dto.SupportedLanguage;
 import com.example.api.dto.TranslationRow;
@@ -110,5 +112,17 @@ public class TranslationController {
                 targetLanguage
         );
         return new GlossarySyncResponse(sourceLanguage, targetLanguage, glossary);
+    }
+
+    @PostMapping("/admin/adaptive-dataset/sync")
+    public AdaptiveDatasetSyncResponse syncAdaptiveDataset(@RequestBody AdaptiveDatasetSyncRequest request) throws Exception {
+        String sourceLanguage = request.getSourceLanguage();
+        String targetLanguage = request.getTargetLanguage();
+        String dataset = translationService.synchronizeAdaptiveDataset(
+                request.getTsvFilePath(),
+                sourceLanguage,
+                targetLanguage
+        );
+        return new AdaptiveDatasetSyncResponse(sourceLanguage, targetLanguage, dataset);
     }
 }
