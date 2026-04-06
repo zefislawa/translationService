@@ -751,6 +751,34 @@ class TranslationServiceTest {
         assertEquals("VALID", report.path("rows").get(0).path("validationStatus").asText());
     }
 
+    @Test
+    void listGlossaryFilesUsesConfiguredDirectoryPathWhenGlossaryFilePointsToDirectory() throws Exception {
+        Path glossaryDir = tempDir.resolve("Glossary");
+        Files.createDirectories(glossaryDir);
+        Files.writeString(glossaryDir.resolve("a.csv"), "hello,bonjour");
+        Files.writeString(glossaryDir.resolve("b.csv"), "bye,au revoir");
+
+        TranslationService service = createServiceWithGlossaryFile(glossaryDir.toString());
+
+        List<String> files = service.listGlossaryFiles();
+
+        assertEquals(List.of("a.csv", "b.csv"), files);
+    }
+
+    @Test
+    void listGlossaryFilesUsesParentDirectoryWhenGlossaryFilePointsToCsvFile() throws Exception {
+        Path glossaryDir = tempDir.resolve("Glossary");
+        Files.createDirectories(glossaryDir);
+        Files.writeString(glossaryDir.resolve("glossary.csv"), "hello,bonjour");
+        Files.writeString(glossaryDir.resolve("other.csv"), "bye,au revoir");
+
+        TranslationService service = createServiceWithGlossaryFile(glossaryDir.resolve("glossary.csv").toString());
+
+        List<String> files = service.listGlossaryFiles();
+
+        assertEquals(List.of("glossary.csv", "other.csv"), files);
+    }
+
     private int countOccurrences(String value, String token) {
         int count = 0;
         int index = 0;
@@ -806,6 +834,38 @@ class TranslationServiceTest {
                 "en",
                 "en",
                 riskyTermsFile,
+                true,
+                true,
+                new ObjectMapper(),
+                new RestTemplateBuilder()
+        );
+    }
+
+    private TranslationService createServiceWithGlossaryFile(String glossaryFilePath) throws Exception {
+        return new TranslationService(
+                tempDir.toString(),
+                "",
+                "en",
+                "fr",
+                "dummy-project-id",
+                "global",
+                "general/translation-llm",
+                true,
+                "bg-terms",
+                glossaryFilePath,
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                50,
+                3,
+                10,
+                "en",
+                "en",
+                "",
                 true,
                 true,
                 new ObjectMapper(),
