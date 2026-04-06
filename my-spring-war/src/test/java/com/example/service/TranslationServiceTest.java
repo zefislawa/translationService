@@ -641,7 +641,7 @@ class TranslationServiceTest {
 
     @Test
     @SuppressWarnings("unchecked")
-    void translateAndStoreUsesAdaptiveMtEndpointWhenDatasetIsActivatedForLanguagePair() throws Exception {
+    void translateAndStoreRoutesOnlyRiskyShortStringsToAdaptiveWhenDatasetIsActivatedForLanguagePair() throws Exception {
         TranslationService service = createService("", false, "en", "fr", 50);
         Field activeAdaptiveDatasetsField = TranslationService.class.getDeclaredField("activeAdaptiveDatasetsByLanguagePair");
         activeAdaptiveDatasetsField.setAccessible(true);
@@ -649,25 +649,45 @@ class TranslationServiceTest {
         activeAdaptiveDatasets.put("en->fr", "projects/dummy-project-id/locations/global/adaptiveMtDatasets/en-fr-app");
 
         MockRestServiceServer server = bindMockServer(service);
-        String url = "https://translation.googleapis.com/v3/projects/dummy-project-id/locations/global:adaptiveMtTranslate";
-        server.expect(requestTo(url))
+        String adaptiveUrl = "https://translation.googleapis.com/v3/projects/dummy-project-id/locations/global:adaptiveMtTranslate";
+        server.expect(requestTo(adaptiveUrl))
                 .andExpect(method(HttpMethod.POST))
                 .andExpect(request -> {
                     ByteArrayOutputStream requestBody = (ByteArrayOutputStream) request.getBody();
                     JsonNode body = new ObjectMapper().readTree(requestBody.toString(StandardCharsets.UTF_8));
                     assertEquals("projects/dummy-project-id/locations/global/adaptiveMtDatasets/en-fr-app", body.path("dataset").asText());
                     assertEquals(1, body.path("content").size());
+                    assertEquals("Apply", body.path("content").get(0).asText());
                 })
                 .andRespond(withSuccess("""
                         {
-                          "translations":[{"translatedText":"Bonjour"}]
+                          "translations":[{"translatedText":"Appliquer"}]
+                        }
+                        """, MediaType.APPLICATION_JSON));
+        String llmUrl = "https://translation.googleapis.com/v3/projects/dummy-project-id/locations/global:translateText";
+        server.expect(requestTo(llmUrl))
+                .andExpect(method(HttpMethod.POST))
+                .andExpect(request -> {
+                    ByteArrayOutputStream requestBody = (ByteArrayOutputStream) request.getBody();
+                    JsonNode body = new ObjectMapper().readTree(requestBody.toString(StandardCharsets.UTF_8));
+                    assertEquals(1, body.path("contents").size());
+                    assertEquals("This is a long neutral sentence", body.path("contents").get(0).asText());
+                })
+                .andRespond(withSuccess("""
+                        {
+                          "translations":[{"translatedText":"Ceci est une longue phrase neutre"}]
                         }
                         """, MediaType.APPLICATION_JSON));
 
         service.translateAndStore(null, "en.json", "fr", List.of(
-                new TranslationRow("b", "hello", "Hello", "")
+                new TranslationRow("b", "apply", "Apply", ""),
+                new TranslationRow("x", "longText", "This is a long neutral sentence", "")
         ));
         server.verify();
+
+        JsonNode translated = new ObjectMapper().readTree(Files.readString(tempDir.resolve("fr.json")));
+        assertEquals("Appliquer", translated.path("b").path("apply").asText());
+        assertEquals("Ceci est une longue phrase neutre", translated.path("x").path("longText").asText());
     }
 
     @Test
