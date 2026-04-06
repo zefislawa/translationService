@@ -1490,14 +1490,24 @@ public class TranslationService {
             return resolveDataDir(null);
         }
 
-        Path configuredPath = Path.of(googleGlossaryFile.trim());
+        String configuredValue = googleGlossaryFile.trim();
+        Path configuredPath = Path.of(configuredValue);
         if (!configuredPath.isAbsolute()) {
             configuredPath = resolveDataDir(null).resolve(configuredPath).normalize();
         }
-        Path parent = configuredPath.getParent();
-        Path directory = parent == null ? resolveDataDir(null) : parent;
+        Path directory;
+        if (Files.isDirectory(configuredPath) || endsWithPathSeparator(configuredValue)) {
+            directory = configuredPath;
+        } else {
+            Path parent = configuredPath.getParent();
+            directory = parent == null ? resolveDataDir(null) : parent;
+        }
         Files.createDirectories(directory);
         return directory;
+    }
+
+    private boolean endsWithPathSeparator(String value) {
+        return value.endsWith("/") || value.endsWith("\\");
     }
 
     private void validateGlossaryCsv(Path glossaryFile) throws Exception {
