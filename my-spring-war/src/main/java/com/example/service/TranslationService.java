@@ -1501,12 +1501,34 @@ public class TranslationService {
 
         Path candidatePath = Path.of(configuredOrRequested.trim());
         if (!candidatePath.isAbsolute()) {
-            candidatePath = resolveDataDir(null).resolve(candidatePath).normalize();
+            Path configuredDirectory = resolveAdaptiveDatasetConfiguredDirectory();
+            if (configuredDirectory != null) {
+                candidatePath = configuredDirectory.resolve(candidatePath).normalize();
+            } else {
+                candidatePath = resolveDataDir(null).resolve(candidatePath).normalize();
+            }
         }
         if (!Files.isRegularFile(candidatePath)) {
             throw new IllegalArgumentException("Adaptive dataset TSV file not found: " + candidatePath);
         }
         return candidatePath;
+    }
+
+    private Path resolveAdaptiveDatasetConfiguredDirectory() throws Exception {
+        if (googleAdaptiveDatasetFile == null || googleAdaptiveDatasetFile.isBlank()) {
+            return null;
+        }
+
+        String configuredValue = googleAdaptiveDatasetFile.trim();
+        Path configuredPath = Path.of(configuredValue);
+        if (!configuredPath.isAbsolute()) {
+            configuredPath = resolveDataDir(null).resolve(configuredPath).normalize();
+        }
+
+        if (Files.isDirectory(configuredPath) || endsWithPathSeparator(configuredValue)) {
+            return configuredPath;
+        }
+        return configuredPath.getParent();
     }
 
     private Path resolveAdaptiveDatasetDirectory() throws Exception {

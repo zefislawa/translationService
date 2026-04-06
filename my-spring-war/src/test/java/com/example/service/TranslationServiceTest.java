@@ -779,6 +779,22 @@ class TranslationServiceTest {
         assertEquals(List.of("glossary.csv", "other.csv"), files);
     }
 
+    @Test
+    void resolveAdaptiveDatasetTsvFileUsesConfiguredDirectoryWhenRequestProvidesRelativeFileName() throws Exception {
+        Path datasetDir = tempDir.resolve("Datasets");
+        Files.createDirectories(datasetDir);
+        Path datasetFile = datasetDir.resolve("adaptive_en_bg_dataset.tsv");
+        Files.writeString(datasetFile, "source\ttarget\nhello\tzdrasti\n");
+
+        TranslationService service = createServiceWithAdaptiveDatasetFile(datasetDir.toString());
+
+        Method resolveMethod = TranslationService.class.getDeclaredMethod("resolveAdaptiveDatasetTsvFile", String.class);
+        resolveMethod.setAccessible(true);
+        Path resolvedPath = (Path) resolveMethod.invoke(service, "adaptive_en_bg_dataset.tsv");
+
+        assertEquals(datasetFile, resolvedPath);
+    }
+
     private int countOccurrences(String value, String token) {
         int count = 0;
         int index = 0;
@@ -857,6 +873,38 @@ class TranslationServiceTest {
                 "",
                 "",
                 "",
+                "",
+                "",
+                "",
+                50,
+                3,
+                10,
+                "en",
+                "en",
+                "",
+                true,
+                true,
+                new ObjectMapper(),
+                new RestTemplateBuilder()
+        );
+    }
+
+    private TranslationService createServiceWithAdaptiveDatasetFile(String adaptiveDatasetFilePath) throws Exception {
+        return new TranslationService(
+                tempDir.toString(),
+                "",
+                "en",
+                "fr",
+                "dummy-project-id",
+                "global",
+                "general/translation-llm",
+                false,
+                "",
+                "",
+                "",
+                "",
+                "",
+                adaptiveDatasetFilePath,
                 "",
                 "",
                 "",
