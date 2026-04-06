@@ -68,13 +68,30 @@ public class TranslationController {
     }
 
     @PostMapping("/translate")
-    public TranslationExportResult translateAndStore(@RequestBody TranslationExportRequest request) throws Exception {
-        return translationService.translateAndStore(
-                request.getPath(),
-                request.getFileName(),
-                request.getTargetLanguage(),
-                request.getRows()
-        );
+    public TranslationExportResult translateAndStore(
+            @RequestBody TranslationExportRequest request,
+            @RequestHeader(value = "X-Translation-Request-Id", required = false) String translationRequestId
+    ) throws Exception {
+        try {
+            return translationService.translateAndStore(
+                    request.getPath(),
+                    request.getFileName(),
+                    request.getTargetLanguage(),
+                    request.getRows(),
+                    translationRequestId
+            );
+        } finally {
+            translationService.clearTranslationCancellation(translationRequestId);
+        }
+    }
+
+    @PostMapping("/translate/{requestId}/cancel")
+    public Map<String, Object> cancelTranslation(@PathVariable("requestId") String requestId) {
+        translationService.cancelTranslationRequest(requestId);
+        Map<String, Object> response = new LinkedHashMap<>();
+        response.put("requestId", requestId);
+        response.put("status", "cancel_requested");
+        return response;
     }
 
 
