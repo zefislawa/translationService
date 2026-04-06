@@ -17,6 +17,7 @@ let mergedPayload = null;
 let translationProgressLogCount = 0;
 let translationProgressState = null;
 let activeTranslationAbortController = null;
+let activeTranslationRequestId = null;
 
 const elements = {
   successMessage: document.getElementById('successMessage'),
@@ -673,7 +674,27 @@ async function loadRows() {
   showSuccessMessage(`Loaded ${rows.length} rows from ${selectedFile}.`);
 }
 
-async function translateAndStore(targetLanguage, signal) {
+function createTranslationRequestId() {
+  if (window.crypto && typeof window.crypto.randomUUID === 'function') {
+    return window.crypto.randomUUID();
+  }
+  return `translation-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+async function requestTranslationCancellation(requestId) {
+  if (!requestId) {
+    return;
+  }
+  try {
+    await fetch(`/api/translations/translate/${encodeURIComponent(requestId)}/cancel`, {
+      method: 'POST'
+    });
+  } catch (error) {
+    console.warn('Failed to notify backend to cancel translation request.', error);
+  }
+}
+
+async function translateAndStore(targetLanguage, signal, requestId) {
   const payloadRows = rows
     .filter((r) => r.selected !== false)
     .map((r) => ({
@@ -684,7 +705,10 @@ async function translateAndStore(targetLanguage, signal) {
 
   const res = await fetch('/api/translations/translate', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Translation-Request-Id': requestId
+    },
     signal,
     body: JSON.stringify({
       fileName: selectedFile,
@@ -971,6 +995,7 @@ function closeTranslationProgressDialog() {
   }
   translationProgressState = null;
   activeTranslationAbortController = null;
+  activeTranslationRequestId = null;
   elements.translationProgressDialog.classList.remove('show');
   elements.translationProgressDialog.setAttribute('aria-hidden', 'true');
 }
@@ -1115,7 +1140,12 @@ async function handleTranslate() {
 
   try {
     activeTranslationAbortController = new AbortController();
-    const result = await translateAndStore(targetLanguage, activeTranslationAbortController.signal);
+    activeTranslationRequestId = createTranslationRequestId();
+    const result = await translateAndStore(
+      targetLanguage,
+      activeTranslationAbortController.signal,
+      activeTranslationRequestId
+    );
     updateTranslationProgress(78, 'Validating translated file...', 'Translation completed. Validating placeholders and risky terms.');
     await handleLoadFiles();
     completeTranslationProgress(
@@ -1139,6 +1169,7 @@ async function handleTranslate() {
     throw error;
   } finally {
     activeTranslationAbortController = null;
+    activeTranslationRequestId = null;
   }
 }
 
@@ -1193,7 +1224,7 @@ async function handleSyncAdaptiveDataset() {
   );
 }
 
-function stopTranslation() {
+async function stopTranslation() {
   if (!activeTranslationAbortController) {
     return;
   }
@@ -1201,8 +1232,9 @@ function stopTranslation() {
   updateTranslationProgress(
     translationProgressState ? translationProgressState.currentPercent : 0,
     'Stopping translation...',
-    'Stop requested. Cancelling translation request...'
+    'Stop requested. Cancelling translation request on backend...'
   );
+  await requestTranslationCancellation(activeTranslationRequestId);
   activeTranslationAbortController.abort();
 }
 
