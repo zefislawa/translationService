@@ -1832,12 +1832,8 @@ public class TranslationService {
                         new GoogleGlossaryInputConfig(new GoogleGlossaryGcsSource(gcsUri))
                 )
         );
-        String glossaryId = glossaryResourceName.substring(glossaryResourceName.lastIndexOf('/') + 1);
-        String createUrl = UriComponentsBuilder.fromHttpUrl(createEndpoint)
-                .queryParam("glossaryId", glossaryId)
-                .toUriString();
         ResponseEntity<GoogleLongRunningOperation> response = restTemplate.postForEntity(
-                createUrl,
+                createEndpoint,
                 new HttpEntity<>(requestBody.glossary(), headers),
                 GoogleLongRunningOperation.class
         );
