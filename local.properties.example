@@ -36,6 +36,19 @@ myapp.local.googleGlossaryEnabled=false
 # Example full path: projects/my-project/locations/us-central1/glossaries/app-terms
 myapp.local.googleGlossaryId=
 
+# Optional local glossary CSV path. Relative paths are resolved from dataDir.
+myapp.local.googleGlossaryFile=glossary.csv
+
+# GCS bucket used to upload glossary CSV files for automated sync.
+myapp.local.googleGlossaryBucket=
+
+# Optional object prefix/folder within the glossary bucket.
+myapp.local.googleGlossaryObjectPrefix=translation-glossaries
+
+# Optional template for generated glossary ids.
+# Supported placeholders: {source}, {target}
+myapp.local.googleGlossaryResourceTemplate=app-glossary-{source}-{target}
+
 # Max number of strings sent per Google Translate API request.
 myapp.local.googleBatchSize=50
 
