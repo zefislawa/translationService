@@ -30,6 +30,8 @@ const elements = {
   nextBtn: document.getElementById('nextBtn'),
   pageInfo: document.getElementById('pageInfo'),
   selectAllRows: document.getElementById('selectAllRows'),
+  glossaryFileSelect: document.getElementById('glossaryFileSelect'),
+  syncGlossaryBtn: document.getElementById('syncGlossaryBtn'),
   targetLanguageSelect: document.getElementById('targetLanguage'),
   translateBtn: document.getElementById('translateBtn'),
   translationForm: document.getElementById('translationForm'),
@@ -85,6 +87,30 @@ async function fetchUiConfig() {
 async function fetchSupportedLanguages() {
   const res = await fetch('/api/translations/supported-languages');
   if (!res.ok) throw new Error(`Unable to load supported languages (HTTP ${res.status})`);
+  return res.json();
+}
+
+async function fetchGlossaryFiles() {
+  const res = await fetch('/api/translations/admin/glossary/files');
+  if (!res.ok) throw new Error(`Unable to load glossary files (HTTP ${res.status})`);
+  return res.json();
+}
+
+async function synchronizeGlossary(glossaryFilePath, sourceLanguage, targetLanguage) {
+  const res = await fetch('/api/translations/admin/glossary/sync', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      glossaryFilePath,
+      sourceLanguage,
+      targetLanguage
+    })
+  });
+
+  if (!res.ok) {
+    const errorText = await res.text();
+    throw new Error(errorText || `Unable to synchronize glossary (HTTP ${res.status})`);
+  }
   return res.json();
 }
 
@@ -227,6 +253,32 @@ function renderSupportedLanguages(languages) {
   if (targetLanguage) {
     elements.targetLanguageSelect.value = targetLanguage;
   }
+}
+
+function renderGlossaryFiles(files) {
+  elements.glossaryFileSelect.innerHTML = '';
+  if (!files || files.length === 0) {
+    const option = document.createElement('option');
+    option.value = '';
+    option.textContent = 'No glossary files found';
+    elements.glossaryFileSelect.appendChild(option);
+    return;
+  }
+
+  files.forEach((fileName) => {
+    const option = document.createElement('option');
+    option.value = fileName;
+    option.textContent = fileName;
+    elements.glossaryFileSelect.appendChild(option);
+  });
+}
+
+function detectSourceLanguageFromSelectedFile(fileName) {
+  if (!fileName) {
+    return '';
+  }
+  const normalized = fileName.replace(/\.json$/i, '').trim();
+  return normalized || '';
 }
 
 
@@ -886,6 +938,13 @@ async function handleLoadFiles() {
   const data = await fetchFiles();
   const files = data.files || [];
   availableFiles = files;
+  try {
+    const glossaryFileData = await fetchGlossaryFiles();
+    renderGlossaryFiles(glossaryFileData.files || []);
+  } catch (error) {
+    console.warn(error);
+    renderGlossaryFiles([]);
+  }
 
   elements.fileSelect.innerHTML = '';
   files.forEach((name) => {
@@ -1021,6 +1080,31 @@ async function handleTranslate() {
   }
 }
 
+async function handleSyncGlossary() {
+  const glossaryFilePath = elements.glossaryFileSelect.value;
+  if (!glossaryFilePath) {
+    alert('Please select a glossary file.');
+    return;
+  }
+
+  const sourceLanguage = detectSourceLanguageFromSelectedFile(selectedFile || elements.fileSelect.value);
+  if (!sourceLanguage) {
+    alert('Please select a translation file so the source language can be inferred.');
+    return;
+  }
+
+  const selectedTargetLanguage = elements.targetLanguageSelect.value;
+  if (!selectedTargetLanguage) {
+    alert('Please select a target language before syncing glossary.');
+    return;
+  }
+
+  const result = await synchronizeGlossary(glossaryFilePath, sourceLanguage, selectedTargetLanguage);
+  showSuccessMessage(
+    `Glossary synchronized for ${result.sourceLanguage} → ${result.targetLanguage}. Active glossary: ${result.glossary}`
+  );
+}
+
 function stopTranslation() {
   if (!activeTranslationAbortController) {
     return;
@@ -1133,6 +1217,7 @@ elements.nextBtn.addEventListener('click', () => {
   }
 });
 elements.selectAllRows.addEventListener('change', handleSelectAllRows);
+elements.syncGlossaryBtn.addEventListener('click', () => handleSyncGlossary().catch((e) => alert(e.message)));
 elements.targetLanguageSelect.addEventListener('change', () => {
   targetLanguage = elements.targetLanguageSelect.value;
 });

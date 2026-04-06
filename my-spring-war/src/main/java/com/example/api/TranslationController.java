@@ -6,6 +6,8 @@ import com.example.api.dto.TranslationCompareTranslateImportRequest;
 import com.example.api.dto.TranslationExportRequest;
 import com.example.api.dto.TranslationExportResult;
 import com.example.api.dto.TranslationFileLoadRequest;
+import com.example.api.dto.GlossarySyncRequest;
+import com.example.api.dto.GlossarySyncResponse;
 import com.example.api.dto.TranslationSaveRequest;
 import com.example.api.dto.SupportedLanguage;
 import com.example.api.dto.TranslationRow;
@@ -39,6 +41,14 @@ public class TranslationController {
     @GetMapping("/supported-languages")
     public List<SupportedLanguage> supportedLanguages() {
         return translationService.getSupportedLanguages();
+    }
+
+    @GetMapping("/admin/glossary/files")
+    public Map<String, Object> listGlossaryFiles() throws Exception {
+        List<String> files = translationService.listGlossaryFiles();
+        Map<String, Object> response = new LinkedHashMap<>();
+        response.put("files", files);
+        return response;
     }
 
     @PostMapping("/load")
@@ -88,5 +98,17 @@ public class TranslationController {
         response.put("file", savedFile.toAbsolutePath().toString());
         response.put("rowCount", request.getRows() == null ? 0 : request.getRows().size());
         return response;
+    }
+
+    @PostMapping("/admin/glossary/sync")
+    public GlossarySyncResponse syncGlossary(@RequestBody GlossarySyncRequest request) throws Exception {
+        String sourceLanguage = request.getSourceLanguage();
+        String targetLanguage = request.getTargetLanguage();
+        String glossary = translationService.synchronizeGlossary(
+                request.getGlossaryFilePath(),
+                sourceLanguage,
+                targetLanguage
+        );
+        return new GlossarySyncResponse(sourceLanguage, targetLanguage, glossary);
     }
 }

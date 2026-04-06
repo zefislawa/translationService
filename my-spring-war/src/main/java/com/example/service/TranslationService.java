@@ -36,6 +36,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
@@ -69,6 +70,10 @@ public class TranslationService {
     private final String googleTranslationModel;
     private final boolean googleGlossaryEnabled;
     private final String googleGlossaryId;
+    private final String googleGlossaryFile;
+    private final String googleGlossaryBucket;
+    private final String googleGlossaryObjectPrefix;
+    private final String googleGlossaryResourceTemplate;
     private final int googleBatchSize;
     private final int googleRetryAttempts;
     private final long googleRetryBackoffMs;
@@ -77,6 +82,7 @@ public class TranslationService {
     private final String riskyTermsFile;
     private final boolean placeholderProtectionEnabled;
     private final boolean validationEnabled;
+    private final Map<String, String> activeGlossariesByLanguagePair = new ConcurrentHashMap<>();
     private GoogleCredentials googleCredentials;
     private AccessToken cachedAccessToken;
     private static final Pattern PLACEHOLDER_PATTERN = Pattern.compile(
@@ -99,6 +105,10 @@ public class TranslationService {
             @Value("${myapp.google.model:general/translation-llm}") String googleTranslationModel,
             @Value("${myapp.google.glossaryEnabled:false}") boolean googleGlossaryEnabled,
             @Value("${myapp.google.glossaryId:}") String googleGlossaryId,
+            @Value("${myapp.google.glossaryFile:}") String googleGlossaryFile,
+            @Value("${myapp.google.glossaryBucket:}") String googleGlossaryBucket,
+            @Value("${myapp.google.glossaryObjectPrefix:}") String googleGlossaryObjectPrefix,
+            @Value("${myapp.google.glossaryResourceTemplate:}") String googleGlossaryResourceTemplate,
             @Value("${myapp.google.batchSize:50}") int googleBatchSize,
             @Value("${myapp.google.retryAttempts:3}") int googleRetryAttempts,
             @Value("${myapp.google.retryBackoffMs:500}") long googleRetryBackoffMs,
@@ -119,6 +129,10 @@ public class TranslationService {
         this.googleTranslationModel = googleTranslationModel;
         this.googleGlossaryEnabled = googleGlossaryEnabled;
         this.googleGlossaryId = googleGlossaryId;
+        this.googleGlossaryFile = googleGlossaryFile;
+        this.googleGlossaryBucket = googleGlossaryBucket;
+        this.googleGlossaryObjectPrefix = googleGlossaryObjectPrefix;
+        this.googleGlossaryResourceTemplate = googleGlossaryResourceTemplate;
         this.googleBatchSize = googleBatchSize;
         this.googleRetryAttempts = googleRetryAttempts;
         this.googleRetryBackoffMs = googleRetryBackoffMs;
@@ -151,6 +165,18 @@ public class TranslationService {
                     .map(Path::getFileName)
                     .map(Path::toString)
                     .filter(name -> name.toLowerCase().endsWith(".json"))
+                    .sorted(Comparator.naturalOrder())
+                    .toList();
+        }
+    }
+
+    public List<String> listGlossaryFiles() throws Exception {
+        Path glossaryDirectory = resolveGlossaryDirectory();
+        try (Stream<Path> stream = Files.list(glossaryDirectory)) {
+            return stream
+                    .filter(Files::isRegularFile)
+                    .map(Path::getFileName)
+                    .map(Path::toString)
                     .sorted(Comparator.naturalOrder())
                     .toList();
         }
@@ -730,7 +756,7 @@ public class TranslationService {
                 targetLanguage,
                 "text/plain",
                 googleTranslationModel,
-                resolveGlossaryConfig()
+                resolveGlossaryConfig(sourceLanguage, targetLanguage)
         );
         try {
             ResponseEntity<GoogleTranslateTextResponse> response = executeTranslateBatchWithRetry(url, body, headers, start, end);
@@ -1219,15 +1245,279 @@ public class TranslationService {
         return "\"" + safeValue.replace("\"", "\"\"") + "\"";
     }
 
-    private GoogleGlossaryConfig resolveGlossaryConfig() {
-        if (!googleGlossaryEnabled || googleGlossaryId == null || googleGlossaryId.isBlank()) {
+    public String synchronizeGlossary(String glossaryFilePathOrName, String sourceLanguage, String targetLanguage) throws Exception {
+        requireGlossaryAutomationEnabled();
+        String normalizedSourceLanguage = normalizeLanguageCodeOrThrow(sourceLanguage, "sourceLanguage");
+        String normalizedTargetLanguage = normalizeLanguageCodeOrThrow(targetLanguage, "targetLanguage");
+        if (normalizedSourceLanguage.equals(normalizedTargetLanguage)) {
+            throw new IllegalArgumentException("sourceLanguage and targetLanguage must be different");
+        }
+
+        Path glossaryFile = resolveGlossaryCsvFile(glossaryFilePathOrName);
+        validateGlossaryCsv(glossaryFile);
+
+        String glossaryResourceName = buildGlossaryResourceName(normalizedSourceLanguage, normalizedTargetLanguage);
+        String gcsUri = uploadGlossaryCsvToGcs(glossaryFile, normalizedSourceLanguage, normalizedTargetLanguage);
+        recreateGlossaryResource(glossaryResourceName, normalizedSourceLanguage, normalizedTargetLanguage, gcsUri);
+        String pairKey = languagePairKey(normalizedSourceLanguage, normalizedTargetLanguage);
+        activeGlossariesByLanguagePair.put(pairKey, glossaryResourceName);
+        log.info("Activated glossary {} for language pair {}", glossaryResourceName, pairKey);
+        return glossaryResourceName;
+    }
+
+    private GoogleGlossaryConfig resolveGlossaryConfig(String sourceLanguage, String targetLanguage) {
+        if (!googleGlossaryEnabled) {
             return null;
         }
 
-        String glossaryPath = googleGlossaryId.startsWith("projects/")
-                ? googleGlossaryId
-                : "projects/" + googleProjectId + "/locations/" + googleLocation + "/glossaries/" + googleGlossaryId;
+        String pairKey = languagePairKey(sourceLanguage, targetLanguage);
+        String activeGlossary = activeGlossariesByLanguagePair.get(pairKey);
+        if (activeGlossary != null && !activeGlossary.isBlank()) {
+            return new GoogleGlossaryConfig(activeGlossary);
+        }
+
+        if (googleGlossaryId == null || googleGlossaryId.isBlank()) {
+            return null;
+        }
+
+        String glossaryPath = normalizeGlossaryResourcePath(googleGlossaryId);
         return new GoogleGlossaryConfig(glossaryPath);
+    }
+
+    private void requireGlossaryAutomationEnabled() {
+        if (!googleGlossaryEnabled) {
+            throw new IllegalStateException("Glossary automation requires myapp.google.glossaryEnabled=true");
+        }
+        requireGoogleProjectId();
+        if (googleLocation == null || googleLocation.isBlank()) {
+            throw new IllegalStateException("Google location is missing. Configure myapp.google.location");
+        }
+        if (googleGlossaryBucket == null || googleGlossaryBucket.isBlank()) {
+            throw new IllegalStateException("Glossary automation requires myapp.google.glossaryBucket");
+        }
+    }
+
+    private String normalizeLanguageCodeOrThrow(String languageCode, String fieldName) {
+        if (languageCode == null || languageCode.isBlank()) {
+            throw new IllegalArgumentException(fieldName + " is required");
+        }
+        String normalized = languageCode.trim().toLowerCase(Locale.ROOT);
+        if (!normalized.matches("^[a-z]{2,3}(?:[-_][a-z0-9]{2,8})*$")) {
+            throw new IllegalArgumentException("Invalid " + fieldName + ": " + languageCode);
+        }
+        return normalized;
+    }
+
+    private Path resolveGlossaryCsvFile(String glossaryFilePathOrName) throws Exception {
+        String configuredOrRequested = glossaryFilePathOrName;
+        if (configuredOrRequested == null || configuredOrRequested.isBlank()) {
+            configuredOrRequested = googleGlossaryFile;
+        }
+        if (configuredOrRequested == null || configuredOrRequested.isBlank()) {
+            throw new IllegalArgumentException("glossaryFilePath is required or configure myapp.google.glossaryFile");
+        }
+
+        Path candidatePath = Path.of(configuredOrRequested.trim());
+        if (!candidatePath.isAbsolute()) {
+            candidatePath = resolveDataDir(null).resolve(candidatePath).normalize();
+        }
+        if (!Files.isRegularFile(candidatePath)) {
+            throw new IllegalArgumentException("Glossary CSV file not found: " + candidatePath);
+        }
+        return candidatePath;
+    }
+
+    private Path resolveGlossaryDirectory() throws Exception {
+        if (googleGlossaryFile == null || googleGlossaryFile.isBlank()) {
+            return resolveDataDir(null);
+        }
+
+        Path configuredPath = Path.of(googleGlossaryFile.trim());
+        if (!configuredPath.isAbsolute()) {
+            configuredPath = resolveDataDir(null).resolve(configuredPath).normalize();
+        }
+        Path parent = configuredPath.getParent();
+        Path directory = parent == null ? resolveDataDir(null) : parent;
+        Files.createDirectories(directory);
+        return directory;
+    }
+
+    private void validateGlossaryCsv(Path glossaryFile) throws Exception {
+        List<String> lines = Files.readAllLines(glossaryFile, StandardCharsets.UTF_8);
+        if (lines.isEmpty()) {
+            throw new IllegalArgumentException("Glossary CSV is empty: " + glossaryFile);
+        }
+
+        int validRows = 0;
+        for (int i = 0; i < lines.size(); i++) {
+            String line = lines.get(i);
+            if (line == null || line.isBlank()) {
+                continue;
+            }
+            String[] columns = line.split(",", -1);
+            if (columns.length != 2) {
+                throw new IllegalArgumentException("Glossary CSV row " + (i + 1) + " must contain exactly 2 columns");
+            }
+            if (columns[0].trim().isEmpty() || columns[1].trim().isEmpty()) {
+                throw new IllegalArgumentException("Glossary CSV row " + (i + 1) + " contains empty columns");
+            }
+            validRows++;
+        }
+        if (validRows == 0) {
+            throw new IllegalArgumentException("Glossary CSV contains no valid rows: " + glossaryFile);
+        }
+    }
+
+    private String uploadGlossaryCsvToGcs(Path glossaryFile, String sourceLanguage, String targetLanguage) throws Exception {
+        String objectPathPrefix = normalizeGcsObjectPrefix();
+        String objectName = objectPathPrefix
+                + sourceLanguage + "-" + targetLanguage + "/"
+                + System.currentTimeMillis() + "-" + glossaryFile.getFileName();
+        String endpoint = UriComponentsBuilder
+                .fromHttpUrl("https://storage.googleapis.com/upload/storage/v1/b/" + googleGlossaryBucket + "/o")
+                .queryParam("uploadType", "media")
+                .queryParam("name", objectName)
+                .build()
+                .encode()
+                .toUriString();
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.valueOf("text/csv; charset=UTF-8"));
+        headers.setBearerAuth(resolveAccessTokenValue());
+        HttpEntity<byte[]> request = new HttpEntity<>(Files.readAllBytes(glossaryFile), headers);
+        restTemplate.postForEntity(endpoint, request, Object.class);
+        return "gs://" + googleGlossaryBucket + "/" + objectName;
+    }
+
+    private String normalizeGcsObjectPrefix() {
+        if (googleGlossaryObjectPrefix == null || googleGlossaryObjectPrefix.isBlank()) {
+            return "";
+        }
+        String normalized = googleGlossaryObjectPrefix.trim().replace('\\', '/');
+        if (normalized.startsWith("/")) {
+            normalized = normalized.substring(1);
+        }
+        if (!normalized.isEmpty() && !normalized.endsWith("/")) {
+            normalized = normalized + "/";
+        }
+        return normalized;
+    }
+
+    private void recreateGlossaryResource(
+            String glossaryResourceName,
+            String sourceLanguage,
+            String targetLanguage,
+            String gcsUri
+    ) {
+        deleteGlossaryIfExists(glossaryResourceName);
+        String createEndpoint = "https://translation.googleapis.com/v3/projects/" + googleProjectId
+                + "/locations/" + googleLocation + "/glossaries";
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        headers.setBearerAuth(resolveAccessTokenValue());
+        GoogleGlossaryCreateRequest requestBody = new GoogleGlossaryCreateRequest(
+                new GoogleGlossaryDefinition(
+                        glossaryResourceName,
+                        new GoogleGlossaryLanguagePair(sourceLanguage, targetLanguage),
+                        new GoogleGlossaryInputConfig(new GoogleGlossaryGcsSource(gcsUri))
+                )
+        );
+        String glossaryId = glossaryResourceName.substring(glossaryResourceName.lastIndexOf('/') + 1);
+        String createUrl = UriComponentsBuilder.fromHttpUrl(createEndpoint)
+                .queryParam("glossaryId", glossaryId)
+                .toUriString();
+        ResponseEntity<GoogleLongRunningOperation> response = restTemplate.postForEntity(
+                createUrl,
+                new HttpEntity<>(requestBody.glossary(), headers),
+                GoogleLongRunningOperation.class
+        );
+        waitForOperationCompletion(extractOperationName(response.getBody(), "create glossary"));
+    }
+
+    private void deleteGlossaryIfExists(String glossaryResourceName) {
+        HttpHeaders headers = new HttpHeaders();
+        headers.setBearerAuth(resolveAccessTokenValue());
+        String deleteUrl = "https://translation.googleapis.com/v3/" + glossaryResourceName;
+        try {
+            ResponseEntity<GoogleLongRunningOperation> response = restTemplate.exchange(
+                    deleteUrl,
+                    org.springframework.http.HttpMethod.DELETE,
+                    new HttpEntity<>(headers),
+                    GoogleLongRunningOperation.class
+            );
+            waitForOperationCompletion(extractOperationName(response.getBody(), "delete glossary"));
+            log.info("Deleted previous glossary resource {}", glossaryResourceName);
+        } catch (HttpStatusCodeException ex) {
+            if (ex.getStatusCode().value() != 404) {
+                throw ex;
+            }
+        }
+    }
+
+    private String extractOperationName(GoogleLongRunningOperation operation, String actionName) {
+        if (operation == null || operation.name() == null || operation.name().isBlank()) {
+            throw new IllegalStateException("Failed to " + actionName + ": empty long-running operation name");
+        }
+        return operation.name();
+    }
+
+    private void waitForOperationCompletion(String operationName) {
+        String operationUrl = "https://translation.googleapis.com/v3/" + operationName;
+        HttpHeaders headers = new HttpHeaders();
+        headers.setBearerAuth(resolveAccessTokenValue());
+        for (int attempt = 0; attempt < 120; attempt++) {
+            ResponseEntity<GoogleLongRunningOperation> response = restTemplate.exchange(
+                    operationUrl,
+                    org.springframework.http.HttpMethod.GET,
+                    new HttpEntity<>(headers),
+                    GoogleLongRunningOperation.class
+            );
+            GoogleLongRunningOperation operation = response.getBody();
+            if (operation != null && Boolean.TRUE.equals(operation.done())) {
+                if (operation.error() != null && operation.error().code() != 0) {
+                    throw new IllegalStateException(
+                            "Glossary operation failed: " + operation.error().code() + " " + operation.error().message()
+                    );
+                }
+                return;
+            }
+            try {
+                TimeUnit.SECONDS.sleep(2);
+            } catch (InterruptedException ex) {
+                Thread.currentThread().interrupt();
+                throw new IllegalStateException("Interrupted while waiting for glossary operation: " + operationName, ex);
+            }
+        }
+        throw new IllegalStateException("Timed out waiting for glossary operation: " + operationName);
+    }
+
+    private String buildGlossaryResourceName(String sourceLanguage, String targetLanguage) {
+        String template = (googleGlossaryResourceTemplate == null || googleGlossaryResourceTemplate.isBlank())
+                ? "app-glossary-{source}-{target}"
+                : googleGlossaryResourceTemplate.trim();
+        String glossaryId = template
+                .replace("{source}", sourceLanguage)
+                .replace("{target}", targetLanguage)
+                .replaceAll("[^a-zA-Z0-9_-]", "-")
+                .toLowerCase(Locale.ROOT);
+        if (glossaryId.isBlank()) {
+            throw new IllegalStateException("Resolved glossary id is empty. Check myapp.google.glossaryResourceTemplate");
+        }
+        return "projects/" + googleProjectId + "/locations/" + googleLocation + "/glossaries/" + glossaryId;
+    }
+
+    private String languagePairKey(String sourceLanguage, String targetLanguage) {
+        String source = sourceLanguage == null ? "" : sourceLanguage.trim().toLowerCase(Locale.ROOT);
+        String target = targetLanguage == null ? "" : targetLanguage.trim().toLowerCase(Locale.ROOT);
+        return source + "->" + target;
+    }
+
+    private String normalizeGlossaryResourcePath(String rawGlossaryIdOrPath) {
+        String normalized = rawGlossaryIdOrPath == null ? "" : rawGlossaryIdOrPath.trim();
+        if (normalized.startsWith("projects/")) {
+            return normalized;
+        }
+        return "projects/" + googleProjectId + "/locations/" + googleLocation + "/glossaries/" + normalized;
     }
 
     private void requireGoogleProjectId() {
@@ -1333,20 +1623,11 @@ public class TranslationService {
         }
 
         List<String> missingProperties = new ArrayList<>();
-        if (configuredSourceLanguage == null || configuredSourceLanguage.isBlank()) {
-            missingProperties.add("myapp.google.sourceLanguage");
-        }
-        if (configuredTargetLanguage == null || configuredTargetLanguage.isBlank()) {
-            missingProperties.add("myapp.google.targetLanguage");
-        }
         if (googleProjectId == null || googleProjectId.isBlank()) {
             missingProperties.add("myapp.google.projectId");
         }
         if (googleLocation == null || googleLocation.isBlank()) {
             missingProperties.add("myapp.google.location");
-        }
-        if (googleGlossaryId == null || googleGlossaryId.isBlank()) {
-            missingProperties.add("myapp.google.glossaryId");
         }
 
         if (!missingProperties.isEmpty()) {
@@ -1467,6 +1748,38 @@ public class TranslationService {
     }
 
     private record GoogleGlossaryConfig(String glossary) {
+    }
+
+    private record GoogleGlossaryCreateRequest(GoogleGlossaryDefinition glossary) {
+    }
+
+    private record GoogleGlossaryDefinition(
+            String name,
+            GoogleGlossaryLanguagePair languagePair,
+            GoogleGlossaryInputConfig inputConfig
+    ) {
+    }
+
+    private record GoogleGlossaryLanguagePair(
+            String sourceLanguageCode,
+            String targetLanguageCode
+    ) {
+    }
+
+    private record GoogleGlossaryInputConfig(GoogleGlossaryGcsSource gcsSource) {
+    }
+
+    private record GoogleGlossaryGcsSource(String inputUri) {
+    }
+
+    private record GoogleLongRunningOperation(
+            String name,
+            Boolean done,
+            GoogleOperationError error
+    ) {
+    }
+
+    private record GoogleOperationError(int code, String message) {
     }
 
     private record GoogleTranslateTextResponse(
