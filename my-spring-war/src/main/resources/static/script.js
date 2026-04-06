@@ -6,6 +6,7 @@ let rowsPerPage = 10;
 let currentPage = 1;
 let editingRow = null;
 let preferredTargetLanguage = "";
+let configuredTargetLanguage = "";
 let preferredDisplayLanguage = "";
 let compareDifferences = [];
 let compareStatusFilter = 'ALL';
@@ -273,9 +274,14 @@ function renderSupportedLanguages(languages) {
     elements.targetLanguageSelect.appendChild(option);
   });
 
+  const normalizedLanguages = languages || [];
   const preferredLanguage = preferredTargetLanguage;
-  const hasPreferredLanguage = (languages || []).some((language) => language.languageCode === preferredLanguage);
-  targetLanguage = hasPreferredLanguage ? preferredLanguage : (languages[0]?.languageCode || '');
+  const configuredLanguage = configuredTargetLanguage;
+  const hasPreferredLanguage = normalizedLanguages.some((language) => language.languageCode === preferredLanguage);
+  const hasConfiguredLanguage = normalizedLanguages.some((language) => language.languageCode === configuredLanguage);
+  targetLanguage = hasPreferredLanguage
+    ? preferredLanguage
+    : (hasConfiguredLanguage ? configuredLanguage : (normalizedLanguages[0]?.languageCode || ''));
   if (targetLanguage) {
     elements.targetLanguageSelect.value = targetLanguage;
   }
@@ -975,9 +981,11 @@ async function handleLoadFiles() {
   try {
     const uiConfig = await fetchUiConfig();
     preferredTargetLanguage = (uiConfig.preferredTargetLanguage || '').trim();
-    preferredDisplayLanguage = (uiConfig.referenceLanguageFile || uiConfig.displayLanguageCode || '').trim();
+    configuredTargetLanguage = (uiConfig.configuredTargetLanguage || '').trim();
+    preferredDisplayLanguage = (uiConfig.displayLanguageCode || uiConfig.referenceLanguageFile || '').trim();
   } catch (error) {
     preferredTargetLanguage = '';
+    configuredTargetLanguage = '';
     preferredDisplayLanguage = '';
     console.warn(error);
   }
