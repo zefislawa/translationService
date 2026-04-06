@@ -36,33 +36,6 @@ myapp.local.googleGlossaryEnabled=false
 # Example full path: projects/my-project/locations/us-central1/glossaries/app-terms
 myapp.local.googleGlossaryId=
 
-# Optional local glossary CSV path. Relative paths are resolved from dataDir.
-myapp.local.googleGlossaryFile=glossary.csv
-
-# GCS bucket used to upload glossary CSV files for automated sync.
-myapp.local.googleGlossaryBucket=
-
-# Optional object prefix/folder within the glossary bucket.
-myapp.local.googleGlossaryObjectPrefix=translation-glossaries
-
-# Optional template for generated glossary ids.
-# Supported placeholders: {source}, {target}
-myapp.local.googleGlossaryResourceTemplate=app-glossary-{source}-{target}
-
-
-# Optional local adaptive dataset TSV path. Relative paths are resolved from dataDir.
-myapp.local.googleAdaptiveDatasetFile=adaptive-dataset.tsv
-
-# GCS bucket used to upload adaptive dataset TSV files for automated sync.
-myapp.local.googleAdaptiveDatasetBucket=
-
-# Optional object prefix/folder within the adaptive dataset bucket.
-myapp.local.googleAdaptiveDatasetObjectPrefix=adaptive-datasets
-
-# Optional template for generated adaptive dataset ids.
-# Supported placeholders: {source}, {target}
-myapp.local.googleAdaptiveDatasetResourceTemplate=app-adaptive-{source}-{target}
-
 # Max number of strings sent per Google Translate API request.
 myapp.local.googleBatchSize=50
 
@@ -86,3 +59,34 @@ myapp.local.placeholderProtectionEnabled=true
 
 # Write validation report files and row-level quality checks.
 myapp.local.validationEnabled=true
+
+# ------------------------------------------------------------------------
+# Recently added sync variables (latest branches), grouped at the end
+# for easier local-vs-example comparison.
+# ------------------------------------------------------------------------
+
+# Optional local glossary CSV path. Relative paths are resolved from dataDir.
+myapp.local.googleGlossaryFile=glossary.csv
+
+# GCS bucket used to upload glossary CSV files for automated sync.
+myapp.local.googleGlossaryBucket=
+
+# Optional object prefix/folder within the glossary bucket.
+myapp.local.googleGlossaryObjectPrefix=translation-glossaries
+
+# Optional template for generated glossary ids.
+# Supported placeholders: {source}, {target}
+myapp.local.googleGlossaryResourceTemplate=app-glossary-{source}-{target}
+
+# Optional local adaptive dataset TSV path. Relative paths are resolved from dataDir.
+myapp.local.googleAdaptiveDatasetFile=adaptive-dataset.tsv
+
+# GCS bucket used to upload adaptive dataset TSV files for automated sync.
+myapp.local.googleAdaptiveDatasetBucket=
+
+# Optional object prefix/folder within the adaptive dataset bucket.
+myapp.local.googleAdaptiveDatasetObjectPrefix=adaptive-datasets
+
+# Optional template for generated adaptive dataset ids.
+# Supported placeholders: {source}, {target}
+myapp.local.googleAdaptiveDatasetResourceTemplate=app-adaptive-{source}-{target}
