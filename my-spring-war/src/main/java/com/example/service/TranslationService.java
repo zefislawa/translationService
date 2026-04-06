@@ -198,6 +198,30 @@ public class TranslationService {
         }
     }
 
+    public List<String> listAdaptiveDatasetFiles() throws Exception {
+        Path adaptiveDatasetDirectory = resolveAdaptiveDatasetDirectory();
+        try (Stream<Path> stream = Files.list(adaptiveDatasetDirectory)) {
+            return stream
+                    .filter(Files::isRegularFile)
+                    .map(Path::getFileName)
+                    .map(Path::toString)
+                    .filter(name -> name.toLowerCase().endsWith(".tsv"))
+                    .sorted(Comparator.naturalOrder())
+                    .toList();
+        }
+    }
+
+    public String configuredAdaptiveDatasetFileName() throws Exception {
+        if (googleAdaptiveDatasetFile == null || googleAdaptiveDatasetFile.isBlank()) {
+            return "";
+        }
+        Path configuredPath = Path.of(googleAdaptiveDatasetFile.trim());
+        if (!configuredPath.isAbsolute()) {
+            configuredPath = resolveDataDir(null).resolve(configuredPath).normalize();
+        }
+        return configuredPath.getFileName() == null ? "" : configuredPath.getFileName().toString();
+    }
+
     public List<TranslationRow> loadRows(String customPath, String fileName) throws Exception {
         Path file = resolveJsonFile(customPath, fileName);
         if (!Files.exists(file)) {
@@ -1483,6 +1507,29 @@ public class TranslationService {
             throw new IllegalArgumentException("Adaptive dataset TSV file not found: " + candidatePath);
         }
         return candidatePath;
+    }
+
+    private Path resolveAdaptiveDatasetDirectory() throws Exception {
+        if (googleAdaptiveDatasetFile == null || googleAdaptiveDatasetFile.isBlank()) {
+            return resolveDataDir(null);
+        }
+
+        String configuredValue = googleAdaptiveDatasetFile.trim();
+        Path configuredPath = Path.of(configuredValue);
+        if (!configuredPath.isAbsolute()) {
+            configuredPath = resolveDataDir(null).resolve(configuredPath).normalize();
+        }
+
+        Path directory;
+        if (Files.isDirectory(configuredPath) || endsWithPathSeparator(configuredValue)) {
+            directory = configuredPath;
+        } else {
+            Path parent = configuredPath.getParent();
+            directory = parent == null ? resolveDataDir(null) : parent;
+        }
+
+        Files.createDirectories(directory);
+        return directory;
     }
 
     private Path resolveGlossaryDirectory() throws Exception {
