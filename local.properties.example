@@ -49,6 +49,20 @@ myapp.local.googleGlossaryObjectPrefix=translation-glossaries
 # Supported placeholders: {source}, {target}
 myapp.local.googleGlossaryResourceTemplate=app-glossary-{source}-{target}
 
+
+# Optional local adaptive dataset TSV path. Relative paths are resolved from dataDir.
+myapp.local.googleAdaptiveDatasetFile=adaptive-dataset.tsv
+
+# GCS bucket used to upload adaptive dataset TSV files for automated sync.
+myapp.local.googleAdaptiveDatasetBucket=
+
+# Optional object prefix/folder within the adaptive dataset bucket.
+myapp.local.googleAdaptiveDatasetObjectPrefix=adaptive-datasets
+
+# Optional template for generated adaptive dataset ids.
+# Supported placeholders: {source}, {target}
+myapp.local.googleAdaptiveDatasetResourceTemplate=app-adaptive-{source}-{target}
+
 # Max number of strings sent per Google Translate API request.
 myapp.local.googleBatchSize=50
 

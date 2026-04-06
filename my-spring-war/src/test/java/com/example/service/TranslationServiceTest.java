@@ -215,6 +215,14 @@ class TranslationServiceTest {
                 "general/translation-llm",
                 false,
                 "bg-terms",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
                 50,
                 3,
                 10,
@@ -439,6 +447,14 @@ class TranslationServiceTest {
                 "general/translation-llm",
                 true,
                 "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
                 50,
                 3,
                 10,
@@ -611,6 +627,50 @@ class TranslationServiceTest {
     }
 
     @Test
+    void validateAdaptiveDatasetTsvRejectsMalformedRows() throws Exception {
+        TranslationService service = createService("", false, "en", "bg", 50);
+        Path tsvFile = tempDir.resolve("adaptive.tsv");
+        Files.writeString(tsvFile, "hello\t\ninvalid-row-without-tab\n");
+
+        Method validateMethod = TranslationService.class.getDeclaredMethod("validateAdaptiveDatasetTsv", Path.class);
+        validateMethod.setAccessible(true);
+        Exception exception = assertThrows(Exception.class, () -> validateMethod.invoke(service, tsvFile));
+
+        assertTrue(exception.getCause().getMessage().contains("exactly 2 tab-separated columns"));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void translateAndStoreUsesAdaptiveMtEndpointWhenDatasetIsActivatedForLanguagePair() throws Exception {
+        TranslationService service = createService("", false, "en", "fr", 50);
+        Field activeAdaptiveDatasetsField = TranslationService.class.getDeclaredField("activeAdaptiveDatasetsByLanguagePair");
+        activeAdaptiveDatasetsField.setAccessible(true);
+        Map<String, String> activeAdaptiveDatasets = (Map<String, String>) activeAdaptiveDatasetsField.get(service);
+        activeAdaptiveDatasets.put("en->fr", "projects/dummy-project-id/locations/global/adaptiveMtDatasets/en-fr-app");
+
+        MockRestServiceServer server = bindMockServer(service);
+        String url = "https://translation.googleapis.com/v3/projects/dummy-project-id/locations/global:adaptiveMtTranslate";
+        server.expect(requestTo(url))
+                .andExpect(method(HttpMethod.POST))
+                .andExpect(request -> {
+                    ByteArrayOutputStream requestBody = (ByteArrayOutputStream) request.getBody();
+                    JsonNode body = new ObjectMapper().readTree(requestBody.toString(StandardCharsets.UTF_8));
+                    assertEquals("projects/dummy-project-id/locations/global/adaptiveMtDatasets/en-fr-app", body.path("dataset").asText());
+                    assertEquals(1, body.path("content").size());
+                })
+                .andRespond(withSuccess("""
+                        {
+                          "translations":[{"translatedText":"Bonjour"}]
+                        }
+                        """, MediaType.APPLICATION_JSON));
+
+        service.translateAndStore(null, "en.json", "fr", List.of(
+                new TranslationRow("b", "hello", "Hello", "")
+        ));
+        server.verify();
+    }
+
+    @Test
     void integrationSmallSampleGeneratesJsonAndCsvReports() throws Exception {
         TranslationService service = createService("", false, "en", "en", 50);
         Files.writeString(tempDir.resolve("en.json"), """
@@ -712,6 +772,14 @@ class TranslationServiceTest {
                 "general/translation-llm",
                 glossaryEnabled,
                 "bg-terms",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
                 batchSize,
                 3,
                 10,
