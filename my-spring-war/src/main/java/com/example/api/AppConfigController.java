@@ -12,18 +12,19 @@ import java.util.Map;
 public class AppConfigController {
 
     private final String preferredTargetLanguage;
+    private final String configuredTargetLanguage;
     private final String displayLanguageCode;
     private final String referenceLanguageFile;
 
     public AppConfigController(
             @Value("${myapp.ui.preferredTargetLanguage:}") String preferredTargetLanguage,
-            @Value("${myapp.google.displayLanguageCode:}") String displayLanguageCode,
+            @Value("${myapp.google.targetLanguage:}") String configuredTargetLanguage,
+            @Value("${myapp.google.supportedLanguagesDisplayLocale:en}") String displayLanguageCode,
             @Value("${myapp.referenceLanguageFile:en}") String referenceLanguageFile
     ) {
-        this.preferredTargetLanguage = preferredTargetLanguage;
-        this.displayLanguageCode = !displayLanguageCode.isBlank()
-                ? displayLanguageCode
-                : normalizeLanguageCode(referenceLanguageFile);
+        this.preferredTargetLanguage = sanitizeLanguageCode(preferredTargetLanguage);
+        this.configuredTargetLanguage = sanitizeLanguageCode(configuredTargetLanguage);
+        this.displayLanguageCode = sanitizeLanguageCode(displayLanguageCode);
         this.referenceLanguageFile = normalizeLanguageCode(referenceLanguageFile);
     }
 
@@ -38,10 +39,19 @@ public class AppConfigController {
                 : normalized;
     }
 
+    private String sanitizeLanguageCode(String rawLanguageCode) {
+        String normalized = normalizeLanguageCode(rawLanguageCode);
+        if ("alltrans".equalsIgnoreCase(normalized)) {
+            return "";
+        }
+        return normalized;
+    }
+
     @GetMapping
     public Map<String, String> getConfig() {
         return Map.of(
                 "preferredTargetLanguage", preferredTargetLanguage,
+                "configuredTargetLanguage", configuredTargetLanguage,
                 "displayLanguageCode", displayLanguageCode,
                 "referenceLanguageFile", referenceLanguageFile
         );
