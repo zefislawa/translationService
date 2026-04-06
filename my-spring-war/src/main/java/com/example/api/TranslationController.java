@@ -118,11 +118,17 @@ public class TranslationController {
     public AdaptiveDatasetSyncResponse syncAdaptiveDataset(@RequestBody AdaptiveDatasetSyncRequest request) throws Exception {
         String sourceLanguage = request.getSourceLanguage();
         String targetLanguage = request.getTargetLanguage();
-        String dataset = translationService.synchronizeAdaptiveDataset(
+        TranslationService.AdaptiveDatasetSyncResult syncResult = translationService.synchronizeAdaptiveDataset(
                 request.getTsvFilePath(),
                 sourceLanguage,
                 targetLanguage
         );
-        return new AdaptiveDatasetSyncResponse(sourceLanguage, targetLanguage, dataset);
+        return new AdaptiveDatasetSyncResponse(
+                sourceLanguage,
+                targetLanguage,
+                syncResult.dataset(),
+                syncResult.importStatus(),
+                syncResult.gcsUri()
+        );
     }
 }
