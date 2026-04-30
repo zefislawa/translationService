@@ -1,10 +1,19 @@
 package com.example.api.dto;
 
 public class AdaptiveDatasetSyncRequest {
+    private String context;
     private String tsvFilePath;
     private String sourceLanguage;
     private String targetLanguage;
 
+
+    public String getContext() {
+        return context;
+    }
+
+    public void setContext(String context) {
+        this.context = context;
+    }
     public String getTsvFilePath() {
         return tsvFilePath;
     }

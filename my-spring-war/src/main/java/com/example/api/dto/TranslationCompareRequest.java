@@ -2,9 +2,18 @@ package com.example.api.dto;
 
 public class TranslationCompareRequest {
     private String path;
+    private String context;
     private String fileName1;
     private String fileName2;
 
+
+    public String getContext() {
+        return context;
+    }
+
+    public void setContext(String context) {
+        this.context = context;
+    }
     public String getPath() {
         return path;
     }

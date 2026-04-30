@@ -4,9 +4,18 @@ import java.util.List;
 
 public class TranslationSaveRequest {
     private String path;
+    private String context;
     private String fileName;
     private List<TranslationRow> rows;
 
+
+    public String getContext() {
+        return context;
+    }
+
+    public void setContext(String context) {
+        this.context = context;
+    }
     public String getPath() {
         return path;
     }
