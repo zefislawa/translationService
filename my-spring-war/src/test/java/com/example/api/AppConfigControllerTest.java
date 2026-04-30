@@ -10,7 +10,11 @@ class AppConfigControllerTest {
 
     @Test
     void returnsPreferredTargetAndDisplayLanguageFromConfig() {
-        AppConfigController controller = new AppConfigController("fr", "bg", "en", "bg");
+        AppConfigController controller = new AppConfigController(
+                "fr", "bg", "en", "bg",
+                "crm/data", "crm/glossary", "crm/adaptive", "crm/translated",
+                "ss/data", "ss/glossary", "ss/adaptive", "ss/translated"
+        );
 
         Map<String, String> config = controller.getConfig();
 
@@ -22,7 +26,11 @@ class AppConfigControllerTest {
 
     @Test
     void normalizesAndSanitizesConfiguredValues() {
-        AppConfigController controller = new AppConfigController("alltrans", "bg.json", "en", "bg.json");
+        AppConfigController controller = new AppConfigController(
+                "alltrans", "bg.json", "en", "bg.json",
+                "crm/data", "crm/glossary", "crm/adaptive", "crm/translated",
+                "ss/data", "ss/glossary", "ss/adaptive", "ss/translated"
+        );
 
         Map<String, String> config = controller.getConfig();
 
