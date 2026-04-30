@@ -659,7 +659,7 @@ async function loadRows() {
   const res = await fetch('/api/translations/load', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ fileName: selectedFile })
+    body: JSON.stringify({ fileName: selectedFile, context: activeContext })
   });
 
   if (!res.ok) throw new Error(`Unable to load file (HTTP ${res.status})`);
