@@ -3,7 +3,6 @@
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
   <modelVersion>4.0.0</modelVersion>
 
-  <!-- Spring Boot parent manages plugin versions (including maven-compiler-plugin) safely -->
   <parent>
     <groupId>org.springframework.boot</groupId>
     <artifactId>spring-boot-starter-parent</artifactId>
@@ -18,27 +17,19 @@
 
   <properties>
     <java.version>17</java.version>
+    <tomcat.scope>provided</tomcat.scope>
   </properties>
 
   <dependencies>
-    <!-- Spring MVC + Jackson -->
     <dependency>
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-starter-web</artifactId>
-      <exclusions>
-        <!-- We deploy to an external Tomcat (JBoss Web Server), so don't embed Tomcat -->
-        <exclusion>
-          <groupId>org.springframework.boot</groupId>
-          <artifactId>spring-boot-starter-tomcat</artifactId>
-        </exclusion>
-      </exclusions>
     </dependency>
 
-    <!-- External container provides Tomcat -->
     <dependency>
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-starter-tomcat</artifactId>
-      <scope>provided</scope>
+      <scope>${tomcat.scope}</scope>
     </dependency>
 
     <dependency>
@@ -47,7 +38,6 @@
       <version>1.30.1</version>
     </dependency>
 
-    <!-- Tests -->
     <dependency>
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-starter-test</artifactId>
@@ -57,7 +47,6 @@
 
   <build>
     <plugins>
-      <!-- Explicitly lock compiler to Java 17 (extra safety) -->
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-compiler-plugin</artifactId>
@@ -72,17 +61,13 @@
       </plugin>
     </plugins>
   </build>
-  <profiles>
-  <profile>
-    <id>dev</id>
-    <dependencies>
-      <!-- Bring embedded Tomcat back for local run only -->
-      <dependency>
-        <groupId>org.springframework.boot</groupId>
-        <artifactId>spring-boot-starter-tomcat</artifactId>
-      </dependency>
-    </dependencies>
-  </profile>
-</profiles>
 
+  <profiles>
+    <profile>
+      <id>dev</id>
+      <properties>
+        <tomcat.scope>runtime</tomcat.scope>
+      </properties>
+    </profile>
+  </profiles>
 </project>
