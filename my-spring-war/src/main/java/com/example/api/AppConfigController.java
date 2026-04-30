@@ -73,19 +73,19 @@ public class AppConfigController {
 
     @GetMapping
     public Map<String, String> getConfig() {
-        return Map.of(
-                "preferredTargetLanguage", preferredTargetLanguage,
-                "configuredTargetLanguage", configuredTargetLanguage,
-                "displayLanguageCode", displayLanguageCode,
-                "referenceLanguageFile", referenceLanguageFile,
-                "crmDataDirectory", crmDataDirectory,
-                "crmGlossaryDirectory", crmGlossaryDirectory,
-                "crmAdaptiveDatasetDirectory", crmAdaptiveDatasetDirectory,
-                "crmTranslatedDirectory", crmTranslatedDirectory,
-                "selfServiceDataDirectory", selfServiceDataDirectory,
-                "selfServiceGlossaryDirectory", selfServiceGlossaryDirectory,
-                "selfServiceAdaptiveDatasetDirectory", selfServiceAdaptiveDatasetDirectory,
-                "selfServiceTranslatedDirectory", selfServiceTranslatedDirectory
+        return Map.ofEntries(
+                Map.entry("preferredTargetLanguage", preferredTargetLanguage),
+                Map.entry("configuredTargetLanguage", configuredTargetLanguage),
+                Map.entry("displayLanguageCode", displayLanguageCode),
+                Map.entry("referenceLanguageFile", referenceLanguageFile),
+                Map.entry("crmDataDirectory", crmDataDirectory),
+                Map.entry("crmGlossaryDirectory", crmGlossaryDirectory),
+                Map.entry("crmAdaptiveDatasetDirectory", crmAdaptiveDatasetDirectory),
+                Map.entry("crmTranslatedDirectory", crmTranslatedDirectory),
+                Map.entry("selfServiceDataDirectory", selfServiceDataDirectory),
+                Map.entry("selfServiceGlossaryDirectory", selfServiceGlossaryDirectory),
+                Map.entry("selfServiceAdaptiveDatasetDirectory", selfServiceAdaptiveDatasetDirectory),
+                Map.entry("selfServiceTranslatedDirectory", selfServiceTranslatedDirectory)
         );
     }
 }
