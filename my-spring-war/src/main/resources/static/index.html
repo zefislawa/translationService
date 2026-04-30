@@ -17,6 +17,11 @@
                 <span id="successMessageText">Translation was successful</span>
             </div>
 
+            <div class="context-tabs" role="tablist" aria-label="Translation contexts">
+                <button type="button" class="context-tab-button active" data-context="crm">CRM</button>
+                <button type="button" class="context-tab-button" data-context="selfService">Self Service</button>
+            </div>
+
             <div class="tabs-card">
                 <div class="tabs-nav" role="tablist" aria-label="Main sections">
                     <button type="button" class="tab-button active" id="tabTranslateCreateCompare" data-tab-target="translateCreateComparePanel" role="tab" aria-selected="true" aria-controls="translateCreateComparePanel">
@@ -84,6 +89,7 @@
                         <div class="pagination-controls">
                             <button type="button" class="btn btn-outline btn-sm" id="prevBtn">Previous</button>
                             <span class="page-info" id="pageInfo">Page 1 of 1</span>
+                            <span class="row-count-info" id="rowCountInfo">Total rows: 0 | Selected rows: 0</span>
                             <button type="button" class="btn btn-outline btn-sm" id="nextBtn">Next</button>
                         </div>
                         <div class="footer-actions">

@@ -707,3 +707,8 @@ body {
         width: 100%;
     }
 }
+
+.context-tabs{display:flex;gap:8px;margin-bottom:4px}
+.context-tab-button{appearance:none;border:1px solid var(--c-border-strong);background:#fff;padding:8px 16px;border-radius:10px;cursor:pointer;font-weight:600}
+.context-tab-button.active{background:var(--c-primary);color:#fff;border-color:var(--c-primary)}
+.row-count-info{margin-left:8px;color:var(--c-muted);font-size:13px}

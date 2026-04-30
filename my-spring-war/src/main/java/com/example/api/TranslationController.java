@@ -36,6 +36,8 @@ public class TranslationController {
     private final String selfServiceDataDirectory;
     private final String selfServiceGlossaryDirectory;
     private final String selfServiceAdaptiveDatasetDirectory;
+    private final String crmTranslatedDirectory;
+    private final String selfServiceTranslatedDirectory;
 
     public TranslationController(
             TranslationService translationService,
@@ -44,7 +46,9 @@ public class TranslationController {
             @Value("${myapp.crm.adaptiveDatasetDirectory:data}") String crmAdaptiveDatasetDirectory,
             @Value("${myapp.selfService.sourceFilesDirectory:data}") String selfServiceDataDirectory,
             @Value("${myapp.selfService.glossaryDirectory:data}") String selfServiceGlossaryDirectory,
-            @Value("${myapp.selfService.adaptiveDatasetDirectory:data}") String selfServiceAdaptiveDatasetDirectory
+            @Value("${myapp.selfService.adaptiveDatasetDirectory:data}") String selfServiceAdaptiveDatasetDirectory,
+            @Value("${myapp.crm.translatedJsonDirectory:data}") String crmTranslatedDirectory,
+            @Value("${myapp.selfService.translatedJsonDirectory:data}") String selfServiceTranslatedDirectory
     ) {
         this.translationService = translationService;
         this.crmDataDirectory = crmDataDirectory;
@@ -53,6 +57,8 @@ public class TranslationController {
         this.selfServiceDataDirectory = selfServiceDataDirectory;
         this.selfServiceGlossaryDirectory = selfServiceGlossaryDirectory;
         this.selfServiceAdaptiveDatasetDirectory = selfServiceAdaptiveDatasetDirectory;
+        this.crmTranslatedDirectory = crmTranslatedDirectory;
+        this.selfServiceTranslatedDirectory = selfServiceTranslatedDirectory;
     }
 
     @GetMapping("/files")
@@ -98,13 +104,15 @@ public class TranslationController {
             @RequestHeader(value = "X-Translation-Request-Id", required = false) String translationRequestId
     ) throws Exception {
         try {
-            return translationService.translateAndStore(
+            TranslationExportResult result = translationService.translateAndStore(
                     resolveSourceDirectory(request.getContext()),
                     request.getFileName(),
                     request.getTargetLanguage(),
                     request.getRows(),
                     translationRequestId
             );
+            copyTranslatedFileToContextDirectory(result.getOutputFile(), request.getContext());
+            return result;
         } finally {
             translationService.clearTranslationCancellation(translationRequestId);
         }
@@ -192,6 +200,17 @@ public class TranslationController {
 
     private String resolveAdaptiveDatasetDirectory(String context) {
         return "selfService".equalsIgnoreCase(context) ? selfServiceAdaptiveDatasetDirectory : crmAdaptiveDatasetDirectory;
+    }
+
+    private String resolveTranslatedDirectory(String context) {
+        return "selfService".equalsIgnoreCase(context) ? selfServiceTranslatedDirectory : crmTranslatedDirectory;
+    }
+
+    private void copyTranslatedFileToContextDirectory(String outputFilePath, String context) throws Exception {
+        Path source = Path.of(outputFilePath).toAbsolutePath().normalize();
+        Path destinationDir = Path.of(resolveTranslatedDirectory(context)).toAbsolutePath().normalize();
+        Files.createDirectories(destinationDir);
+        Files.copy(source, destinationDir.resolve(source.getFileName()), java.nio.file.StandardCopyOption.REPLACE_EXISTING);
     }
 
     private List<String> listFilesByExtension(String directory, String extension) throws Exception {

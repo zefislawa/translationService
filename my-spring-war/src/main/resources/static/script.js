@@ -1,3 +1,4 @@
+let activeContext = "crm";
 let rows = [];
 let searchQuery = "";
 let selectedFile = "";
@@ -73,11 +74,13 @@ const elements = {
   translationProgressBar: document.getElementById('translationProgressBar'),
   translationProgressLogs: document.getElementById('translationProgressLogs'),
   stopTranslationBtn: document.getElementById('stopTranslationBtn'),
-  closeTranslationProgressBtn: document.getElementById('closeTranslationProgressBtn')
+  closeTranslationProgressBtn: document.getElementById('closeTranslationProgressBtn'),
+  contextTabButtons: document.querySelectorAll('.context-tab-button'),
+  rowCountInfo: document.getElementById('rowCountInfo')
 };
 
 async function fetchFiles() {
-  const res = await fetch('/api/translations/files');
+  const res = await fetch(`/api/translations/files?context=${activeContext}`);
   if (!res.ok) throw new Error(`Unable to list files (HTTP ${res.status})`);
   return res.json();
 }
@@ -95,13 +98,13 @@ async function fetchSupportedLanguages() {
 }
 
 async function fetchGlossaryFiles() {
-  const res = await fetch('/api/translations/admin/glossary/files');
+  const res = await fetch(`/api/translations/admin/glossary/files?context=${activeContext}`);
   if (!res.ok) throw new Error(`Unable to load glossary files (HTTP ${res.status})`);
   return res.json();
 }
 
 async function fetchAdaptiveDatasetFiles() {
-  const res = await fetch('/api/translations/admin/adaptive-dataset/files');
+  const res = await fetch(`/api/translations/admin/adaptive-dataset/files?context=${activeContext}`);
   if (!res.ok) throw new Error(`Unable to load adaptive dataset files (HTTP ${res.status})`);
   return res.json();
 }
@@ -112,6 +115,7 @@ async function synchronizeGlossary(glossaryFilePath, sourceLanguage, targetLangu
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       glossaryFilePath,
+      context: activeContext,
       sourceLanguage,
       targetLanguage
     })
@@ -130,6 +134,7 @@ async function synchronizeAdaptiveDataset(tsvFilePath, sourceLanguage, targetLan
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       tsvFilePath,
+      context: activeContext,
       sourceLanguage,
       targetLanguage
     })
@@ -146,7 +151,7 @@ async function fetchRowsForFile(fileName) {
   const res = await fetch('/api/translations/load', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ fileName })
+    body: JSON.stringify({ fileName, context: activeContext })
   });
 
   if (!res.ok) throw new Error(`Unable to load ${fileName} for deep merge (HTTP ${res.status})`);
@@ -340,7 +345,7 @@ async function compareFiles(file1, file2) {
   const res = await fetch('/api/translations/compare', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ fileName1: file1, fileName2: file2 })
+    body: JSON.stringify({ fileName1: file1, fileName2: file2, context: activeContext })
   });
 
   if (!res.ok) throw new Error(`Unable to compare files (HTTP ${res.status})`);
@@ -354,6 +359,7 @@ async function translateAndImportCompareRows(sourceFileName, targetFileName, row
     body: JSON.stringify({
       sourceFileName,
       targetFileName,
+      context: activeContext,
       rows
     })
   });
@@ -712,6 +718,7 @@ async function translateAndStore(targetLanguage, signal, requestId) {
     signal,
     body: JSON.stringify({
       fileName: selectedFile,
+      context: activeContext,
       targetLanguage,
       rows: payloadRows
     })
@@ -845,6 +852,8 @@ function renderTable() {
   elements.pageInfo.textContent = `Page ${currentPage} of ${totalPages}`;
   elements.prevBtn.disabled = currentPage <= 1;
   elements.nextBtn.disabled = currentPage >= totalPages;
+  const selectedRowsCount = rows.filter((row) => row.selected !== false).length;
+  elements.rowCountInfo.textContent = `Total rows: ${rows.length} | Selected rows: ${selectedRowsCount}`;
 }
 
 function openValueDialog(row) {
@@ -1147,6 +1156,8 @@ async function handleTranslate() {
       activeTranslationRequestId
     );
     updateTranslationProgress(78, 'Validating translated file...', 'Translation completed. Validating placeholders and risky terms.');
+    const deepMergeButton = document.getElementById('tabDeepMerge');
+    if (deepMergeButton) deepMergeButton.style.display = 'none';
     await handleLoadFiles();
     completeTranslationProgress(
       `Completed successfully. ${Number(result.textCount || 0)} rows translated and validated.`,
@@ -1305,6 +1316,7 @@ async function handleSubmit(e) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       fileName: selectedFile,
+      context: activeContext,
       rows: payloadRows
     })
   });
@@ -1362,6 +1374,9 @@ elements.translationForm.addEventListener('submit', (e) => handleSubmit(e).catch
 elements.tabButtons.forEach((button) => {
   button.addEventListener('click', () => activateTab(button.dataset.tabTarget));
 });
+elements.contextTabButtons.forEach((button) => {
+  button.addEventListener('click', () => switchContext(button.dataset.context));
+});
 elements.runDeepMergeBtn.addEventListener('click', () => runDeepMerge().catch((e) => alert(e.message)));
 elements.downloadMergedBtn.addEventListener('click', handleDownloadMergedFile);
 elements.closeValueDialog.addEventListener('click', closeValueDialog);
@@ -1394,8 +1409,24 @@ document.addEventListener('keydown', (e) => {
   }
 });
 
+
+function switchContext(nextContext) {
+  activeContext = nextContext;
+  elements.contextTabButtons.forEach((btn)=>btn.classList.toggle('active', btn.dataset.context===nextContext));
+  const deepMergeButton = document.getElementById('tabDeepMerge');
+  if (deepMergeButton) {
+    deepMergeButton.style.display = nextContext === 'selfService' ? 'inline-flex' : 'none';
+    if (nextContext !== 'selfService' && deepMergeButton.classList.contains('active')) {
+      activateTab('translateCreateComparePanel');
+    }
+  }
+  handleLoadFiles().then(()=> loadRows()).catch((e)=>alert(e.message));
+}
+
 document.addEventListener('DOMContentLoaded', async () => {
   try {
+    const deepMergeButton = document.getElementById('tabDeepMerge');
+    if (deepMergeButton) deepMergeButton.style.display = 'none';
     await handleLoadFiles();
     if (elements.fileSelect.value) {
       await loadRows();
