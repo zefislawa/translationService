@@ -15,17 +15,41 @@ public class AppConfigController {
     private final String configuredTargetLanguage;
     private final String displayLanguageCode;
     private final String referenceLanguageFile;
+    private final String crmDataDirectory;
+    private final String crmGlossaryDirectory;
+    private final String crmAdaptiveDatasetDirectory;
+    private final String crmTranslatedDirectory;
+    private final String selfServiceDataDirectory;
+    private final String selfServiceGlossaryDirectory;
+    private final String selfServiceAdaptiveDatasetDirectory;
+    private final String selfServiceTranslatedDirectory;
 
     public AppConfigController(
             @Value("${myapp.ui.preferredTargetLanguage:}") String preferredTargetLanguage,
             @Value("${myapp.google.targetLanguage:}") String configuredTargetLanguage,
             @Value("${myapp.google.supportedLanguagesDisplayLocale:en}") String displayLanguageCode,
-            @Value("${myapp.referenceLanguageFile:en}") String referenceLanguageFile
+            @Value("${myapp.referenceLanguageFile:en}") String referenceLanguageFile,
+            @Value("${myapp.crm.sourceFilesDirectory:data}") String crmDataDirectory,
+            @Value("${myapp.crm.glossaryDirectory:data}") String crmGlossaryDirectory,
+            @Value("${myapp.crm.adaptiveDatasetDirectory:data}") String crmAdaptiveDatasetDirectory,
+            @Value("${myapp.crm.translatedJsonDirectory:data}") String crmTranslatedDirectory,
+            @Value("${myapp.selfService.sourceFilesDirectory:data}") String selfServiceDataDirectory,
+            @Value("${myapp.selfService.glossaryDirectory:data}") String selfServiceGlossaryDirectory,
+            @Value("${myapp.selfService.adaptiveDatasetDirectory:data}") String selfServiceAdaptiveDatasetDirectory,
+            @Value("${myapp.selfService.translatedJsonDirectory:data}") String selfServiceTranslatedDirectory
     ) {
         this.preferredTargetLanguage = sanitizeLanguageCode(preferredTargetLanguage);
         this.configuredTargetLanguage = sanitizeLanguageCode(configuredTargetLanguage);
         this.displayLanguageCode = sanitizeLanguageCode(displayLanguageCode);
         this.referenceLanguageFile = normalizeLanguageCode(referenceLanguageFile);
+        this.crmDataDirectory = crmDataDirectory;
+        this.crmGlossaryDirectory = crmGlossaryDirectory;
+        this.crmAdaptiveDatasetDirectory = crmAdaptiveDatasetDirectory;
+        this.crmTranslatedDirectory = crmTranslatedDirectory;
+        this.selfServiceDataDirectory = selfServiceDataDirectory;
+        this.selfServiceGlossaryDirectory = selfServiceGlossaryDirectory;
+        this.selfServiceAdaptiveDatasetDirectory = selfServiceAdaptiveDatasetDirectory;
+        this.selfServiceTranslatedDirectory = selfServiceTranslatedDirectory;
     }
 
     private String normalizeLanguageCode(String rawLanguageCode) {
@@ -53,7 +77,15 @@ public class AppConfigController {
                 "preferredTargetLanguage", preferredTargetLanguage,
                 "configuredTargetLanguage", configuredTargetLanguage,
                 "displayLanguageCode", displayLanguageCode,
-                "referenceLanguageFile", referenceLanguageFile
+                "referenceLanguageFile", referenceLanguageFile,
+                "crmDataDirectory", crmDataDirectory,
+                "crmGlossaryDirectory", crmGlossaryDirectory,
+                "crmAdaptiveDatasetDirectory", crmAdaptiveDatasetDirectory,
+                "crmTranslatedDirectory", crmTranslatedDirectory,
+                "selfServiceDataDirectory", selfServiceDataDirectory,
+                "selfServiceGlossaryDirectory", selfServiceGlossaryDirectory,
+                "selfServiceAdaptiveDatasetDirectory", selfServiceAdaptiveDatasetDirectory,
+                "selfServiceTranslatedDirectory", selfServiceTranslatedDirectory
         );
     }
 }

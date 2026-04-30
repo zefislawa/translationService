@@ -1,10 +1,19 @@
 package com.example.api.dto;
 
 public class GlossarySyncRequest {
+    private String context;
     private String glossaryFilePath;
     private String sourceLanguage;
     private String targetLanguage;
 
+
+    public String getContext() {
+        return context;
+    }
+
+    public void setContext(String context) {
+        this.context = context;
+    }
     public String getGlossaryFilePath() {
         return glossaryFilePath;
     }

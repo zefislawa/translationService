@@ -14,9 +14,13 @@ import com.example.api.dto.TranslationSaveRequest;
 import com.example.api.dto.SupportedLanguage;
 import com.example.api.dto.TranslationRow;
 import com.example.service.TranslationService;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.web.bind.annotation.*;
 
+import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Comparator;
+import java.util.stream.Stream;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -26,13 +30,34 @@ import java.util.Map;
 public class TranslationController {
 
     private final TranslationService translationService;
+    private final String crmDataDirectory;
+    private final String crmGlossaryDirectory;
+    private final String crmAdaptiveDatasetDirectory;
+    private final String selfServiceDataDirectory;
+    private final String selfServiceGlossaryDirectory;
+    private final String selfServiceAdaptiveDatasetDirectory;
 
-    public TranslationController(TranslationService translationService) {
+    public TranslationController(
+            TranslationService translationService,
+            @Value("${myapp.crm.sourceFilesDirectory:data}") String crmDataDirectory,
+            @Value("${myapp.crm.glossaryDirectory:data}") String crmGlossaryDirectory,
+            @Value("${myapp.crm.adaptiveDatasetDirectory:data}") String crmAdaptiveDatasetDirectory,
+            @Value("${myapp.selfService.sourceFilesDirectory:data}") String selfServiceDataDirectory,
+            @Value("${myapp.selfService.glossaryDirectory:data}") String selfServiceGlossaryDirectory,
+            @Value("${myapp.selfService.adaptiveDatasetDirectory:data}") String selfServiceAdaptiveDatasetDirectory
+    ) {
         this.translationService = translationService;
+        this.crmDataDirectory = crmDataDirectory;
+        this.crmGlossaryDirectory = crmGlossaryDirectory;
+        this.crmAdaptiveDatasetDirectory = crmAdaptiveDatasetDirectory;
+        this.selfServiceDataDirectory = selfServiceDataDirectory;
+        this.selfServiceGlossaryDirectory = selfServiceGlossaryDirectory;
+        this.selfServiceAdaptiveDatasetDirectory = selfServiceAdaptiveDatasetDirectory;
     }
 
     @GetMapping("/files")
-    public Map<String, Object> listFiles(@RequestParam(value = "path", required = false) String path) throws Exception {
+    public Map<String, Object> listFiles(@RequestParam(value = "context", required = false, defaultValue = "crm") String context) throws Exception {
+        String path = resolveSourceDirectory(context);
         List<String> files = translationService.listJsonFiles(path);
         Map<String, Object> response = new LinkedHashMap<>();
         response.put("path", path);
@@ -46,16 +71,16 @@ public class TranslationController {
     }
 
     @GetMapping("/admin/glossary/files")
-    public Map<String, Object> listGlossaryFiles() throws Exception {
-        List<String> files = translationService.listGlossaryFiles();
+    public Map<String, Object> listGlossaryFiles(@RequestParam(value = "context", required = false, defaultValue = "crm") String context) throws Exception {
+        List<String> files = listFilesByExtension(resolveGlossaryDirectory(context), null);
         Map<String, Object> response = new LinkedHashMap<>();
         response.put("files", files);
         return response;
     }
 
     @GetMapping("/admin/adaptive-dataset/files")
-    public Map<String, Object> listAdaptiveDatasetFiles() throws Exception {
-        List<String> files = translationService.listAdaptiveDatasetFiles();
+    public Map<String, Object> listAdaptiveDatasetFiles(@RequestParam(value = "context", required = false, defaultValue = "crm") String context) throws Exception {
+        List<String> files = listFilesByExtension(resolveAdaptiveDatasetDirectory(context), ".tsv");
         Map<String, Object> response = new LinkedHashMap<>();
         response.put("files", files);
         response.put("configuredFile", translationService.configuredAdaptiveDatasetFileName());
@@ -64,7 +89,7 @@ public class TranslationController {
 
     @PostMapping("/load")
     public List<TranslationRow> loadRows(@RequestBody TranslationFileLoadRequest request) throws Exception {
-        return translationService.loadRows(request.getPath(), request.getFileName());
+        return translationService.loadRows(resolveSourceDirectory(request.getContext()), request.getFileName());
     }
 
     @PostMapping("/translate")
@@ -74,7 +99,7 @@ public class TranslationController {
     ) throws Exception {
         try {
             return translationService.translateAndStore(
-                    request.getPath(),
+                    resolveSourceDirectory(request.getContext()),
                     request.getFileName(),
                     request.getTargetLanguage(),
                     request.getRows(),
@@ -98,7 +123,7 @@ public class TranslationController {
     @PostMapping("/compare")
     public TranslationCompareResult compareFiles(@RequestBody TranslationCompareRequest request) throws Exception {
         return translationService.compareFiles(
-                request.getPath(),
+                resolveSourceDirectory(request.getContext()),
                 request.getFileName1(),
                 request.getFileName2()
         );
@@ -107,7 +132,7 @@ public class TranslationController {
     @PostMapping("/compare/translate-import")
     public TranslationExportResult translateImportCompareRows(@RequestBody TranslationCompareTranslateImportRequest request) throws Exception {
         return translationService.translateAndImport(
-                request.getPath(),
+                resolveSourceDirectory(request.getContext()),
                 request.getSourceFileName(),
                 request.getTargetFileName(),
                 request.getRows()
@@ -117,7 +142,7 @@ public class TranslationController {
     @PostMapping("/save")
     public Map<String, Object> saveRows(@RequestBody TranslationSaveRequest request) throws Exception {
         Path savedFile = translationService.saveRows(
-                request.getPath(),
+                resolveSourceDirectory(request.getContext()),
                 request.getFileName(),
                 request.getRows()
         );
@@ -133,7 +158,7 @@ public class TranslationController {
         String sourceLanguage = request.getSourceLanguage();
         String targetLanguage = request.getTargetLanguage();
         String glossary = translationService.synchronizeGlossary(
-                request.getGlossaryFilePath(),
+                resolveGlossaryDirectory(request.getContext()) + "/" + request.getGlossaryFilePath(),
                 sourceLanguage,
                 targetLanguage
         );
@@ -145,7 +170,7 @@ public class TranslationController {
         String sourceLanguage = request.getSourceLanguage();
         String targetLanguage = request.getTargetLanguage();
         TranslationService.AdaptiveDatasetSyncResult syncResult = translationService.synchronizeAdaptiveDataset(
-                request.getTsvFilePath(),
+                resolveAdaptiveDatasetDirectory(request.getContext()) + "/" + request.getTsvFilePath(),
                 sourceLanguage,
                 targetLanguage
         );
@@ -157,4 +182,29 @@ public class TranslationController {
                 syncResult.gcsUri()
         );
     }
+    private String resolveSourceDirectory(String context) {
+        return "selfService".equalsIgnoreCase(context) ? selfServiceDataDirectory : crmDataDirectory;
+    }
+
+    private String resolveGlossaryDirectory(String context) {
+        return "selfService".equalsIgnoreCase(context) ? selfServiceGlossaryDirectory : crmGlossaryDirectory;
+    }
+
+    private String resolveAdaptiveDatasetDirectory(String context) {
+        return "selfService".equalsIgnoreCase(context) ? selfServiceAdaptiveDatasetDirectory : crmAdaptiveDatasetDirectory;
+    }
+
+    private List<String> listFilesByExtension(String directory, String extension) throws Exception {
+        Path dir = Path.of(directory).toAbsolutePath().normalize();
+        Files.createDirectories(dir);
+        try (Stream<Path> stream = Files.list(dir)) {
+            return stream.filter(Files::isRegularFile)
+                    .map(Path::getFileName)
+                    .map(Path::toString)
+                    .filter(name -> extension == null || name.toLowerCase().endsWith(extension))
+                    .sorted(Comparator.naturalOrder())
+                    .toList();
+        }
+    }
+
 }

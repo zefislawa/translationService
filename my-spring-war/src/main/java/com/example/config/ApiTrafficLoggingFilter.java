@@ -91,8 +91,12 @@ public class ApiTrafficLoggingFilter extends OncePerRequestFilter {
             return "<non-textual content>";
         }
 
-        Charset charset = StringUtils.hasText(encoding)
-                ? Charset.forName(encoding)
+        String normalizedEncoding = encoding;
+        if (!StringUtils.hasText(normalizedEncoding) && StringUtils.hasText(contentType)) {
+            normalizedEncoding = StandardCharsets.UTF_8.name();
+        }
+        Charset charset = StringUtils.hasText(normalizedEncoding)
+                ? Charset.forName(normalizedEncoding)
                 : StandardCharsets.UTF_8;
 
         String text = new String(body, charset);

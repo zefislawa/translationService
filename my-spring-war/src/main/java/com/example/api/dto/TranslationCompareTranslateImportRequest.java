@@ -5,10 +5,19 @@ import java.util.List;
 public class TranslationCompareTranslateImportRequest {
 
     private String path;
+    private String context;
     private String sourceFileName;
     private String targetFileName;
     private List<TranslationRow> rows;
 
+
+    public String getContext() {
+        return context;
+    }
+
+    public void setContext(String context) {
+        this.context = context;
+    }
     public String getPath() {
         return path;
     }

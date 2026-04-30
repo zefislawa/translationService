@@ -90,3 +90,15 @@ myapp.local.googleAdaptiveDatasetObjectPrefix=adaptive-datasets
 # Optional template for generated adaptive dataset ids.
 # Supported placeholders: {source}, {target}
 myapp.local.googleAdaptiveDatasetResourceTemplate=app-adaptive-{source}-{target}
+
+# CRM specific directories
+myapp.local.crmSourceFilesDirectory=data/crm/source
+myapp.local.crmGlossaryDirectory=data/crm/glossary
+myapp.local.crmAdaptiveDatasetDirectory=data/crm/adaptive
+myapp.local.crmTranslatedJsonDirectory=data/crm/translated
+
+# Self Service (CSS) specific directories
+myapp.local.selfServiceSourceFilesDirectory=data/self-service/source
+myapp.local.selfServiceGlossaryDirectory=data/self-service/glossary
+myapp.local.selfServiceAdaptiveDatasetDirectory=data/self-service/adaptive
+myapp.local.selfServiceTranslatedJsonDirectory=data/self-service/translated
