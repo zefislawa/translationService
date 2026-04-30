@@ -19,6 +19,7 @@ let translationProgressLogCount = 0;
 let translationProgressState = null;
 let activeTranslationAbortController = null;
 let activeTranslationRequestId = null;
+const selectedFileByContext = { crm: '', selfService: '' };
 
 const elements = {
   successMessage: document.getElementById('successMessage'),
@@ -329,7 +330,8 @@ function renderAdaptiveDatasetFiles(files, configuredFile) {
   });
 
   const configured = (configuredFile || '').trim();
-  elements.adaptiveDatasetFileSelect.value = files.includes(configured) ? configured : files[0];
+  const configuredBaseName = configured.split(/[\/]/).pop() || '';
+  elements.adaptiveDatasetFileSelect.value = files.includes(configuredBaseName) ? configuredBaseName : files[0];
 }
 
 function detectSourceLanguageFromSelectedFile(fileName) {
@@ -651,6 +653,7 @@ async function handleCompareTranslateImport() {
 
 async function loadRows() {
   selectedFile = elements.fileSelect.value;
+  selectedFileByContext[activeContext] = selectedFile;
 
   if (!selectedFile) {
     throw new Error("Please load and select a file first.");
@@ -728,6 +731,22 @@ async function translateAndStore(targetLanguage, signal, requestId) {
   return res.json();
 }
 
+
+function clearTableState() {
+  rows = [];
+  selectedFile = '';
+  searchQuery = '';
+  currentPage = 1;
+  elements.searchInput.value = '';
+  elements.selectAllRows.checked = false;
+  renderTable();
+}
+
+function updateSelectedRowsCount() {
+  const selectedRowsCount = rows.filter((row) => row.selected !== false).length;
+  elements.rowCountInfo.textContent = `Total rows: ${rows.length} | Selected rows: ${selectedRowsCount}`;
+}
+
 function getFilteredRows() {
   if (!searchQuery) return rows;
   const q = searchQuery.toLowerCase();
@@ -767,6 +786,7 @@ function renderTable() {
       row.selected = e.target.checked;
       const allRowsSelected = rows.length > 0 && rows.every((item) => item.selected !== false);
       elements.selectAllRows.checked = allRowsSelected;
+      updateSelectedRowsCount();
     });
     checkboxTd.appendChild(rowCheckbox);
     tr.appendChild(checkboxTd);
@@ -852,8 +872,7 @@ function renderTable() {
   elements.pageInfo.textContent = `Page ${currentPage} of ${totalPages}`;
   elements.prevBtn.disabled = currentPage <= 1;
   elements.nextBtn.disabled = currentPage >= totalPages;
-  const selectedRowsCount = rows.filter((row) => row.selected !== false).length;
-  elements.rowCountInfo.textContent = `Total rows: ${rows.length} | Selected rows: ${selectedRowsCount}`;
+  updateSelectedRowsCount();
 }
 
 function openValueDialog(row) {
@@ -1010,7 +1029,7 @@ function closeTranslationProgressDialog() {
 }
 
 async function handleLoadFiles() {
-  const previouslySelectedFile = elements.fileSelect.value || selectedFile;
+  const previouslySelectedFile = selectedFileByContext[activeContext] || elements.fileSelect.value || selectedFile;
 
   try {
     const uiConfig = await fetchUiConfig();
@@ -1061,6 +1080,7 @@ async function handleLoadFiles() {
   elements.fileSelect.value = selectedFileStillExists
     ? previouslySelectedFile
     : (directLanguageFileMatch || fallbackLanguageFileMatch || files[0] || '');
+  selectedFileByContext[activeContext] = elements.fileSelect.value || '';
 
   [elements.compareFile1, elements.compareFile2].forEach((select, index) => {
     select.innerHTML = '';
@@ -1331,7 +1351,10 @@ async function handleSubmit(e) {
 }
 
 elements.loadFilesBtn.addEventListener('click', () => handleLoadFiles().catch((e) => alert(e.message)));
-elements.selectFileBtn.addEventListener('click', () => loadRows().catch((e) => alert(e.message)));
+elements.selectFileBtn.addEventListener('click', () => {
+  selectedFileByContext[activeContext] = elements.fileSelect.value || '';
+  loadRows().catch((e) => alert(e.message));
+});
 elements.searchInput.addEventListener('input', handleSearch);
 elements.rowsPerPageSelect.addEventListener('change', handleRowsPerPageChange);
 elements.newLabelBtn.addEventListener('click', handleAddNewLabel);
@@ -1412,6 +1435,7 @@ document.addEventListener('keydown', (e) => {
 
 function switchContext(nextContext) {
   activeContext = nextContext;
+  selectedFile = selectedFileByContext[nextContext] || '';
   elements.contextTabButtons.forEach((btn)=>btn.classList.toggle('active', btn.dataset.context===nextContext));
   const deepMergeButton = document.getElementById('tabDeepMerge');
   if (deepMergeButton) {
@@ -1420,7 +1444,15 @@ function switchContext(nextContext) {
       activateTab('translateCreateComparePanel');
     }
   }
-  handleLoadFiles().then(()=> loadRows()).catch((e)=>alert(e.message));
+  handleLoadFiles().then(() => {
+    const fileForContext = selectedFileByContext[nextContext] || elements.fileSelect.value;
+    if (fileForContext) {
+      elements.fileSelect.value = fileForContext;
+      return loadRows();
+    }
+    clearTableState();
+    return Promise.resolve();
+  }).catch((e)=>alert(e.message));
 }
 
 document.addEventListener('DOMContentLoaded', async () => {
