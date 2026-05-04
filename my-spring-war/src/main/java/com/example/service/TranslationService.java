@@ -1478,14 +1478,21 @@ public class TranslationService {
     }
 
     private String resolveAdaptiveDatasetForTargetLanguage(String sourceLanguage, String targetLanguage) {
-        String directMatch = resolveAdaptiveDataset(sourceLanguage, targetLanguage);
-        if (directMatch != null && !directMatch.isBlank()) {
-            return directMatch;
+        for (String sourceCandidate : languageCodeCandidates(sourceLanguage)) {
+            for (String targetCandidate : languageCodeCandidates(targetLanguage)) {
+                String directMatch = resolveAdaptiveDataset(sourceCandidate, targetCandidate);
+                if (directMatch != null && !directMatch.isBlank()) {
+                    return directMatch;
+                }
+            }
         }
-        String normalizedTarget = targetLanguage == null ? "" : targetLanguage.trim().toLowerCase(Locale.ROOT);
-        if (normalizedTarget.isBlank()) {
+
+        Set<String> sourceCandidates = languageCodeCandidates(sourceLanguage);
+        Set<String> targetCandidates = languageCodeCandidates(targetLanguage);
+        if (targetCandidates.isEmpty()) {
             return null;
         }
+
         for (Map.Entry<String, String> entry : activeAdaptiveDatasetsByLanguagePair.entrySet()) {
             String key = entry.getKey();
             String value = entry.getValue();
@@ -1493,11 +1500,12 @@ public class TranslationService {
                 continue;
             }
             int separator = key.indexOf(':');
-            if (separator < 0 || separator == key.length() - 1) {
+            if (separator < 1 || separator == key.length() - 1) {
                 continue;
             }
+            String keySource = key.substring(0, separator).trim().toLowerCase(Locale.ROOT);
             String keyTarget = key.substring(separator + 1).trim().toLowerCase(Locale.ROOT);
-            if (normalizedTarget.equals(keyTarget)) {
+            if (sourceCandidates.contains(keySource) && targetCandidates.contains(keyTarget)) {
                 return value;
             }
         }
@@ -1545,29 +1553,33 @@ public class TranslationService {
             return null;
         }
 
-        String pairKey = languagePairKey(sourceLanguage, targetLanguage);
-        String activeGlossary = activeGlossariesByLanguagePair.get(pairKey);
-        if ((activeGlossary == null || activeGlossary.isBlank()) && targetLanguage != null && !targetLanguage.isBlank()) {
-            String normalizedTarget = targetLanguage.trim().toLowerCase(Locale.ROOT);
-            for (Map.Entry<String, String> entry : activeGlossariesByLanguagePair.entrySet()) {
-                String key = entry.getKey();
-                String value = entry.getValue();
-                if (value == null || value.isBlank() || key == null) {
-                    continue;
-                }
-                int separator = key.indexOf(':');
-                if (separator < 0 || separator == key.length() - 1) {
-                    continue;
-                }
-                String keyTarget = key.substring(separator + 1).trim().toLowerCase(Locale.ROOT);
-                if (normalizedTarget.equals(keyTarget)) {
-                    activeGlossary = value;
-                    break;
+        Set<String> sourceCandidates = languageCodeCandidates(sourceLanguage);
+        Set<String> targetCandidates = languageCodeCandidates(targetLanguage);
+
+        for (String sourceCandidate : sourceCandidates) {
+            for (String targetCandidate : targetCandidates) {
+                String activeGlossary = activeGlossariesByLanguagePair.get(languagePairKey(sourceCandidate, targetCandidate));
+                if (activeGlossary != null && !activeGlossary.isBlank()) {
+                    return new GoogleGlossaryConfig(activeGlossary);
                 }
             }
         }
-        if (activeGlossary != null && !activeGlossary.isBlank()) {
-            return new GoogleGlossaryConfig(activeGlossary);
+
+        for (Map.Entry<String, String> entry : activeGlossariesByLanguagePair.entrySet()) {
+            String key = entry.getKey();
+            String value = entry.getValue();
+            if (value == null || value.isBlank() || key == null) {
+                continue;
+            }
+            int separator = key.indexOf(':');
+            if (separator < 1 || separator == key.length() - 1) {
+                continue;
+            }
+            String keySource = key.substring(0, separator).trim().toLowerCase(Locale.ROOT);
+            String keyTarget = key.substring(separator + 1).trim().toLowerCase(Locale.ROOT);
+            if (sourceCandidates.contains(keySource) && targetCandidates.contains(keyTarget)) {
+                return new GoogleGlossaryConfig(value);
+            }
         }
 
         if (googleGlossaryId == null || googleGlossaryId.isBlank()) {
@@ -1576,6 +1588,21 @@ public class TranslationService {
 
         String glossaryPath = normalizeGlossaryResourcePath(googleGlossaryId);
         return new GoogleGlossaryConfig(glossaryPath);
+    }
+
+
+    private Set<String> languageCodeCandidates(String languageCode) {
+        String normalized = languageCode == null ? "" : languageCode.trim().toLowerCase(Locale.ROOT).replace('_', '-');
+        if (normalized.isBlank()) {
+            return Set.of();
+        }
+        LinkedHashSet<String> candidates = new LinkedHashSet<>();
+        candidates.add(normalized);
+        int separator = normalized.indexOf('-');
+        if (separator > 0) {
+            candidates.add(normalized.substring(0, separator));
+        }
+        return candidates;
     }
 
     private void requireGlossaryAutomationEnabled() {
