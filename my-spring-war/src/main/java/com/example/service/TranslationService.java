@@ -1450,6 +1450,8 @@ public class TranslationService {
         requireAdaptiveDatasetAutomationConfigured();
         String normalizedSourceLanguage = normalizeLanguageCodeOrThrow(sourceLanguage, "sourceLanguage");
         String normalizedTargetLanguage = normalizeLanguageCodeOrThrow(targetLanguage, "targetLanguage");
+        String googleSourceLanguage = normalizeGoogleLanguageCodeOrThrow(normalizedSourceLanguage, "sourceLanguage");
+        String googleTargetLanguage = normalizeGoogleLanguageCodeOrThrow(normalizedTargetLanguage, "targetLanguage");
         if (normalizedSourceLanguage.equals(normalizedTargetLanguage)) {
             throw new IllegalArgumentException("sourceLanguage and targetLanguage must be different");
         }
@@ -1459,7 +1461,7 @@ public class TranslationService {
 
         String datasetResourceName = buildAdaptiveDatasetResourceName(normalizedSourceLanguage, normalizedTargetLanguage);
         String gcsUri = uploadAdaptiveDatasetTsvToGcs(adaptiveDatasetFile, normalizedSourceLanguage, normalizedTargetLanguage);
-        createAdaptiveDatasetIfMissing(datasetResourceName, normalizedSourceLanguage, normalizedTargetLanguage);
+        createAdaptiveDatasetIfMissing(datasetResourceName, googleSourceLanguage, googleTargetLanguage);
         String importStatus = importAdaptiveDatasetTsv(datasetResourceName, gcsUri, adaptiveDatasetFile.getFileName().toString());
 
         String pairKey = languagePairKey(normalizedSourceLanguage, normalizedTargetLanguage);
