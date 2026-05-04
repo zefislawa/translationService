@@ -930,7 +930,9 @@ public class TranslationService {
             String translationRequestId
     ) {
         throwIfTranslationCancelled(translationRequestId);
-        String adaptiveDataset = resolveAdaptiveDataset(sourceLanguage, targetLanguage);
+        String googleSourceLanguage = normalizeGoogleLanguageCodeOrThrow(sourceLanguage, "sourceLanguage");
+        String googleTargetLanguage = normalizeGoogleLanguageCodeOrThrow(targetLanguage, "targetLanguage");
+        String adaptiveDataset = resolveAdaptiveDatasetForTargetLanguage(googleSourceLanguage, googleTargetLanguage);
         boolean adaptiveAvailable = adaptiveDataset != null && !adaptiveDataset.isBlank();
         List<PreparedTranslationItem> adaptiveCandidates = new ArrayList<>();
         List<PreparedTranslationItem> llmCandidates = new ArrayList<>();
@@ -945,8 +947,8 @@ public class TranslationService {
         Map<Integer, TranslatedItemResult> translatedByIndex = new LinkedHashMap<>();
         if (!adaptiveCandidates.isEmpty()) {
             GoogleTranslationBatchResult adaptiveTranslations = callGoogleTranslationRoute(
-                    sourceLanguage,
-                    targetLanguage,
+                    googleSourceLanguage,
+                    googleTargetLanguage,
                     adaptiveCandidates,
                     adaptiveDataset,
                     translationRequestId
@@ -966,8 +968,8 @@ public class TranslationService {
 
         if (!llmCandidates.isEmpty()) {
             GoogleTranslationBatchResult llmTranslations = callGoogleTranslationRoute(
-                    sourceLanguage,
-                    targetLanguage,
+                    googleSourceLanguage,
+                    googleTargetLanguage,
                     llmCandidates,
                     null,
                     translationRequestId
@@ -1475,6 +1477,33 @@ public class TranslationService {
         return activeAdaptiveDatasetsByLanguagePair.get(languagePairKey(sourceLanguage, targetLanguage));
     }
 
+    private String resolveAdaptiveDatasetForTargetLanguage(String sourceLanguage, String targetLanguage) {
+        String directMatch = resolveAdaptiveDataset(sourceLanguage, targetLanguage);
+        if (directMatch != null && !directMatch.isBlank()) {
+            return directMatch;
+        }
+        String normalizedTarget = targetLanguage == null ? "" : targetLanguage.trim().toLowerCase(Locale.ROOT);
+        if (normalizedTarget.isBlank()) {
+            return null;
+        }
+        for (Map.Entry<String, String> entry : activeAdaptiveDatasetsByLanguagePair.entrySet()) {
+            String key = entry.getKey();
+            String value = entry.getValue();
+            if (value == null || value.isBlank() || key == null) {
+                continue;
+            }
+            int separator = key.indexOf(':');
+            if (separator < 0 || separator == key.length() - 1) {
+                continue;
+            }
+            String keyTarget = key.substring(separator + 1).trim().toLowerCase(Locale.ROOT);
+            if (normalizedTarget.equals(keyTarget)) {
+                return value;
+            }
+        }
+        return null;
+    }
+
     private void loadPersistedAdaptiveDatasets() {
         Path registryFile = defaultDataDir.resolve(ADAPTIVE_DATASETS_REGISTRY_FILE);
         if (!Files.exists(registryFile)) {
@@ -1518,6 +1547,25 @@ public class TranslationService {
 
         String pairKey = languagePairKey(sourceLanguage, targetLanguage);
         String activeGlossary = activeGlossariesByLanguagePair.get(pairKey);
+        if ((activeGlossary == null || activeGlossary.isBlank()) && targetLanguage != null && !targetLanguage.isBlank()) {
+            String normalizedTarget = targetLanguage.trim().toLowerCase(Locale.ROOT);
+            for (Map.Entry<String, String> entry : activeGlossariesByLanguagePair.entrySet()) {
+                String key = entry.getKey();
+                String value = entry.getValue();
+                if (value == null || value.isBlank() || key == null) {
+                    continue;
+                }
+                int separator = key.indexOf(':');
+                if (separator < 0 || separator == key.length() - 1) {
+                    continue;
+                }
+                String keyTarget = key.substring(separator + 1).trim().toLowerCase(Locale.ROOT);
+                if (normalizedTarget.equals(keyTarget)) {
+                    activeGlossary = value;
+                    break;
+                }
+            }
+        }
         if (activeGlossary != null && !activeGlossary.isBlank()) {
             return new GoogleGlossaryConfig(activeGlossary);
         }
