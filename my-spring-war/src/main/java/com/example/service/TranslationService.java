@@ -1798,7 +1798,7 @@ public class TranslationService {
         String createEndpoint = "https://translation.googleapis.com/v3/" + parent + "/adaptiveMtDatasets";
         String datasetId = datasetResourceName.substring(datasetResourceName.lastIndexOf('/') + 1);
         String createUrl = UriComponentsBuilder.fromHttpUrl(createEndpoint)
-                .queryParam("adaptiveMtDatasetId", datasetId)
+                 .queryParam("datasetId", datasetId)
                 .toUriString();
 
         HttpHeaders headers = new HttpHeaders();
