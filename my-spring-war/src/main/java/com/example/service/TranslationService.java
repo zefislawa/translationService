@@ -1805,12 +1805,25 @@ public class TranslationService {
 
         GoogleAdaptiveDatasetCreateRequest requestBody = new GoogleAdaptiveDatasetCreateRequest(
                 datasetResourceName,
+                extractAdaptiveDatasetDisplayName(datasetResourceName),
                 sourceLanguage,
                 targetLanguage
         );
 
         restTemplate.postForEntity(createUrl, new HttpEntity<>(requestBody, headers), Object.class);
         waitForAdaptiveDatasetAvailability(datasetResourceName);
+    }
+
+    private String extractAdaptiveDatasetDisplayName(String datasetResourceName) {
+        if (datasetResourceName == null || datasetResourceName.isBlank()) {
+            throw new IllegalArgumentException("Dataset resource name cannot be null or blank");
+        }
+        int lastSlash = datasetResourceName.lastIndexOf('/');
+        String displayName = lastSlash >= 0 ? datasetResourceName.substring(lastSlash + 1) : datasetResourceName;
+        if (displayName.isBlank()) {
+            throw new IllegalArgumentException("Dataset display name cannot be blank");
+        }
+        return displayName;
     }
 
     private boolean adaptiveDatasetExists(String datasetResourceName) {
@@ -2316,6 +2329,7 @@ public class TranslationService {
 
     private record GoogleAdaptiveDatasetCreateRequest(
             String name,
+            String displayName,
             String sourceLanguageCode,
             String targetLanguageCode
     ) {
