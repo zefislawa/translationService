@@ -1891,10 +1891,7 @@ public class TranslationService {
         headers.setBearerAuth(resolveAccessTokenValue());
 
         GoogleAdaptiveDatasetImportRequest requestBody = new GoogleAdaptiveDatasetImportRequest(
-                new GoogleAdaptiveDatasetFileInputSource(
-                        new GoogleAdaptiveDatasetGcsInputSource(gcsUri),
-                        fileDisplayName
-                )
+                new GoogleAdaptiveDatasetGcsInputSource(gcsUri)
         );
 
         restTemplate.postForEntity(importUrl, new HttpEntity<>(requestBody, headers), Object.class);
@@ -2363,13 +2360,7 @@ public class TranslationService {
     }
 
     private record GoogleAdaptiveDatasetImportRequest(
-            GoogleAdaptiveDatasetFileInputSource inputSource
-    ) {
-    }
-
-    private record GoogleAdaptiveDatasetFileInputSource(
-            GoogleAdaptiveDatasetGcsInputSource gcsInputSource,
-            String displayName
+            GoogleAdaptiveDatasetGcsInputSource gcsInputSource
     ) {
     }
 
