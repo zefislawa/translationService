@@ -1462,7 +1462,7 @@ public class TranslationService {
         String datasetResourceName = buildAdaptiveDatasetResourceName(normalizedSourceLanguage, normalizedTargetLanguage);
         String gcsUri = uploadAdaptiveDatasetTsvToGcs(adaptiveDatasetFile, normalizedSourceLanguage, normalizedTargetLanguage);
         createAdaptiveDatasetIfMissing(datasetResourceName, googleSourceLanguage, googleTargetLanguage);
-        String importStatus = importAdaptiveDatasetTsv(datasetResourceName, gcsUri, adaptiveDatasetFile.getFileName().toString());
+        String importStatus = importAdaptiveDatasetTsv(datasetResourceName, gcsUri, extractGcsObjectName(gcsUri));
 
         String pairKey = languagePairKey(normalizedSourceLanguage, normalizedTargetLanguage);
         activeAdaptiveDatasetsByLanguagePair.put(pairKey, datasetResourceName);
@@ -1896,6 +1896,17 @@ public class TranslationService {
 
         restTemplate.postForEntity(importUrl, new HttpEntity<>(requestBody, headers), Object.class);
         return waitForAdaptiveMtFileImport(datasetResourceName, fileDisplayName);
+    }
+
+    private String extractGcsObjectName(String gcsUri) {
+        if (gcsUri == null || gcsUri.isBlank()) {
+            throw new IllegalArgumentException("GCS URI cannot be null or blank");
+        }
+        int lastSlash = gcsUri.lastIndexOf('/');
+        if (lastSlash < 0 || lastSlash == gcsUri.length() - 1) {
+            throw new IllegalArgumentException("Invalid GCS URI, cannot determine object name: " + gcsUri);
+        }
+        return gcsUri.substring(lastSlash + 1);
     }
 
     private String waitForAdaptiveMtFileImport(String datasetResourceName, String fileDisplayName) {
