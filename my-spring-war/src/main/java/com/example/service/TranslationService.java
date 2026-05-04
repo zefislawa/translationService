@@ -32,6 +32,7 @@ import org.springframework.web.util.UriComponentsBuilder;
 import java.nio.file.Files;
 import java.io.InputStream;
 import java.nio.file.Path;
+import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
@@ -1433,10 +1434,12 @@ public class TranslationService {
 
         Path glossaryFile = resolveGlossaryCsvFile(glossaryFilePathOrName);
         validateGlossaryCsv(glossaryFile);
+        String googleSourceLanguage = normalizeGoogleLanguageCodeOrThrow(normalizedSourceLanguage, "sourceLanguage");
+        String googleTargetLanguage = normalizeGoogleLanguageCodeOrThrow(normalizedTargetLanguage, "targetLanguage");
 
         String glossaryResourceName = buildGlossaryResourceName(normalizedSourceLanguage, normalizedTargetLanguage);
         String gcsUri = uploadGlossaryCsvToGcs(glossaryFile, normalizedSourceLanguage, normalizedTargetLanguage);
-        recreateGlossaryResource(glossaryResourceName, normalizedSourceLanguage, normalizedTargetLanguage, gcsUri);
+        recreateGlossaryResource(glossaryResourceName, googleSourceLanguage, googleTargetLanguage, gcsUri);
         String pairKey = languagePairKey(normalizedSourceLanguage, normalizedTargetLanguage);
         activeGlossariesByLanguagePair.put(pairKey, glossaryResourceName);
         log.info("Activated glossary {} for language pair {}", glossaryResourceName, pairKey);
@@ -1557,6 +1560,28 @@ public class TranslationService {
             throw new IllegalArgumentException("Invalid " + fieldName + ": " + languageCode);
         }
         return normalized;
+    }
+
+    private String normalizeGoogleLanguageCodeOrThrow(String languageCode, String fieldName) {
+        String candidate = languageCode == null ? "" : languageCode.trim().toLowerCase(Locale.ROOT);
+        if (candidate.startsWith("css_")) {
+            candidate = candidate.substring(4);
+        }
+        if (candidate.contains("_")) {
+            candidate = candidate.replace('_', '-');
+        }
+        if (!candidate.matches("^[a-z]{2,3}(?:-[a-z0-9]{2,8})*$")) {
+            throw new IllegalArgumentException("Invalid Google " + fieldName + " language code: " + languageCode);
+        }
+        return candidate;
+    }
+
+    private byte[] readFileAsUtf8Bytes(Path file) throws Exception {
+        try {
+            return Files.readString(file, StandardCharsets.UTF_8).getBytes(StandardCharsets.UTF_8);
+        } catch (java.nio.charset.MalformedInputException ex) {
+            return Files.readString(file, Charset.forName("windows-1251")).getBytes(StandardCharsets.UTF_8);
+        }
     }
 
     private Path resolveGlossaryCsvFile(String glossaryFilePathOrName) throws Exception {
@@ -1735,7 +1760,7 @@ public class TranslationService {
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.valueOf("text/csv; charset=UTF-8"));
         headers.setBearerAuth(resolveAccessTokenValue());
-        HttpEntity<byte[]> request = new HttpEntity<>(Files.readAllBytes(glossaryFile), headers);
+        HttpEntity<byte[]> request = new HttpEntity<>(readFileAsUtf8Bytes(glossaryFile), headers);
         restTemplate.postForEntity(endpoint, request, Object.class);
         return "gs://" + googleGlossaryBucket + "/" + objectName;
     }
