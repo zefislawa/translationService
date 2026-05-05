@@ -81,6 +81,7 @@ public class TranslationService {
     private final String googleAdaptiveDatasetBucket;
     private final String googleAdaptiveDatasetObjectPrefix;
     private final String googleAdaptiveDatasetResourceTemplate;
+    private final boolean googleAdaptiveDatasetEnabled;
     private final int googleBatchSize;
     private final int googleRetryAttempts;
     private final long googleRetryBackoffMs;
@@ -123,6 +124,7 @@ public class TranslationService {
             @Value("${myapp.google.adaptiveDatasetBucket:}") String googleAdaptiveDatasetBucket,
             @Value("${myapp.google.adaptiveDatasetObjectPrefix:}") String googleAdaptiveDatasetObjectPrefix,
             @Value("${myapp.google.adaptiveDatasetResourceTemplate:}") String googleAdaptiveDatasetResourceTemplate,
+            @Value("${myapp.google.adaptiveDatasetEnabled:true}") boolean googleAdaptiveDatasetEnabled,
             @Value("${myapp.google.batchSize:50}") int googleBatchSize,
             @Value("${myapp.google.retryAttempts:3}") int googleRetryAttempts,
             @Value("${myapp.google.retryBackoffMs:500}") long googleRetryBackoffMs,
@@ -151,6 +153,7 @@ public class TranslationService {
         this.googleAdaptiveDatasetBucket = googleAdaptiveDatasetBucket;
         this.googleAdaptiveDatasetObjectPrefix = googleAdaptiveDatasetObjectPrefix;
         this.googleAdaptiveDatasetResourceTemplate = googleAdaptiveDatasetResourceTemplate;
+        this.googleAdaptiveDatasetEnabled = googleAdaptiveDatasetEnabled;
         this.googleBatchSize = googleBatchSize;
         this.googleRetryAttempts = googleRetryAttempts;
         this.googleRetryBackoffMs = googleRetryBackoffMs;
@@ -932,7 +935,9 @@ public class TranslationService {
         throwIfTranslationCancelled(translationRequestId);
         String googleSourceLanguage = normalizeGoogleLanguageCodeOrThrow(sourceLanguage, "sourceLanguage");
         String googleTargetLanguage = normalizeGoogleLanguageCodeOrThrow(targetLanguage, "targetLanguage");
-        String adaptiveDataset = resolveAdaptiveDatasetForTargetLanguage(googleSourceLanguage, googleTargetLanguage);
+        String adaptiveDataset = googleAdaptiveDatasetEnabled
+                ? resolveAdaptiveDatasetForTargetLanguage(googleSourceLanguage, googleTargetLanguage)
+                : null;
         boolean adaptiveAvailable = adaptiveDataset != null && !adaptiveDataset.isBlank();
         List<PreparedTranslationItem> adaptiveCandidates = new ArrayList<>();
         List<PreparedTranslationItem> llmCandidates = new ArrayList<>();

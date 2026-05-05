@@ -91,6 +91,10 @@ myapp.local.googleAdaptiveDatasetObjectPrefix=adaptive-datasets
 # Supported placeholders: {source}, {target}
 myapp.local.googleAdaptiveDatasetResourceTemplate=app-adaptive-{source}-{target}
 
+# Enable adaptive dataset usage during translation.
+# Set to false to translate using glossary/LLM path only.
+myapp.local.googleAdaptiveDatasetEnabled=true
+
 # CRM specific directories
 myapp.local.crmSourceFilesDirectory=data/crm/source
 myapp.local.crmGlossaryDirectory=data/crm/glossary
