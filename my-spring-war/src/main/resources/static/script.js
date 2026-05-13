@@ -728,6 +728,7 @@ async function translateAndStore(targetLanguage, signal, requestId) {
     body: JSON.stringify({
       fileName: selectedFile,
       context: activeContext,
+      mode: translationMode,
       targetLanguage,
       rows: payloadRows
     })
