@@ -72,7 +72,12 @@ public class TranslationController {
     }
 
     @GetMapping("/supported-languages")
-    public List<SupportedLanguage> supportedLanguages() {
+    public List<SupportedLanguage> supportedLanguages(
+            @RequestParam(value = "mode", required = false, defaultValue = "standard") String mode
+    ) {
+        if ("adaptive".equalsIgnoreCase(mode)) {
+            return translationService.getAdaptiveTranslationSupportedLanguages();
+        }
         return translationService.getSupportedLanguages();
     }
 

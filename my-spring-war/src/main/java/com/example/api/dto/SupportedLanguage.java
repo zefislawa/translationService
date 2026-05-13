@@ -2,7 +2,8 @@ package com.example.api.dto;
 
 public record SupportedLanguage(
         String languageCode,
-        String displayName
+        String displayName,
+        boolean supportSource,
+        boolean supportTarget
 ) {
 }
-

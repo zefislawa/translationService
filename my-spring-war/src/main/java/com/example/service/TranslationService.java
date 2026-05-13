@@ -576,11 +576,23 @@ public class TranslationService {
     }
 
     public List<SupportedLanguage> getSupportedLanguages() {
+        return getSupportedLanguages(null);
+    }
+
+    public List<SupportedLanguage> getAdaptiveTranslationSupportedLanguages() {
+        String translationLlmModel = "projects/" + googleProjectId + "/locations/" + googleLocation + "/models/general/translation-llm";
+        return getSupportedLanguages(translationLlmModel);
+    }
+
+    private List<SupportedLanguage> getSupportedLanguages(String model) {
         requireGoogleProjectId();
-        String url = UriComponentsBuilder
+        UriComponentsBuilder uriBuilder = UriComponentsBuilder
                 .fromHttpUrl("https://translation.googleapis.com/v3/projects/" + googleProjectId + "/locations/" + googleLocation + "/supportedLanguages")
-                .queryParam("displayLanguageCode", supportedLanguagesDisplayLocale)
-                .toUriString();
+                .queryParam("displayLanguageCode", supportedLanguagesDisplayLocale);
+        if (model != null && !model.isBlank()) {
+            uriBuilder.queryParam("model", model);
+        }
+        String url = uriBuilder.toUriString();
 
         HttpHeaders headers = new HttpHeaders();
         headers.setBearerAuth(resolveAccessTokenValue());
@@ -599,7 +611,12 @@ public class TranslationService {
 
         return responseBody.languages().stream()
                 .filter(language -> language.languageCode() != null && !language.languageCode().isBlank())
-                .map(language -> new SupportedLanguage(language.languageCode(), Objects.requireNonNullElse(language.displayName(), language.languageCode())))
+                .map(language -> new SupportedLanguage(
+                        language.languageCode(),
+                        Objects.requireNonNullElse(language.displayName(), language.languageCode()),
+                        language.supportSource(),
+                        language.supportTarget()
+                ))
                 .sorted(Comparator.comparing(SupportedLanguage::displayName, String.CASE_INSENSITIVE_ORDER))
                 .toList();
     }
@@ -2469,15 +2486,21 @@ public class TranslationService {
 
     private record GoogleSupportedLanguage(
             String languageCode,
-            String displayName
+            String displayName,
+            boolean supportSource,
+            boolean supportTarget
     ) {
         @JsonCreator
         private GoogleSupportedLanguage(
                 @JsonProperty("language") @JsonAlias("languageCode") String languageCode,
-                @JsonProperty("name") @JsonAlias("displayName") String displayName
+                @JsonProperty("name") @JsonAlias("displayName") String displayName,
+                @JsonProperty("supportSource") Boolean supportSource,
+                @JsonProperty("supportTarget") Boolean supportTarget
         ) {
             this.languageCode = languageCode;
             this.displayName = displayName;
+            this.supportSource = Boolean.TRUE.equals(supportSource);
+            this.supportTarget = Boolean.TRUE.equals(supportTarget);
         }
     }
 

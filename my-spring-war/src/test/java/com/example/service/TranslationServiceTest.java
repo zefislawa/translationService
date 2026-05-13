@@ -3,6 +3,7 @@ package com.example.service;
 import com.example.api.dto.TranslationCompareResult;
 import com.example.api.dto.TranslationExportResult;
 import com.example.api.dto.TranslationRow;
+import com.example.api.dto.SupportedLanguage;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
@@ -502,6 +503,51 @@ class TranslationServiceTest {
                 "GOOGLE_APPLICATION_CREDENTIALS=C:/Users/example/credentials.json"
         );
         assertEquals("C:/Users/example/credentials.json", normalizedEnvProperty);
+    }
+
+    @Test
+    void getAdaptiveTranslationSupportedLanguagesUsesTranslationLlmModelQueryParameter() throws Exception {
+        TranslationService service = createService("", false, "en", "bg", 50);
+        MockRestServiceServer server = bindMockServer(service);
+
+        server.expect(requestTo(org.hamcrest.Matchers.containsString(
+                        "supportedLanguages?displayLanguageCode=en&model=projects/dummy-project-id/locations/global/models/general/translation-llm")))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess("""
+                        {
+                          "languages":[
+                            {"language":"fr","displayName":"French","supportSource":true,"supportTarget":true}
+                          ]
+                        }
+                        """, MediaType.APPLICATION_JSON));
+
+        List<SupportedLanguage> result = service.getAdaptiveTranslationSupportedLanguages();
+        assertEquals(1, result.size());
+        assertEquals("fr", result.get(0).languageCode());
+        assertTrue(result.get(0).supportSource());
+        assertTrue(result.get(0).supportTarget());
+        server.verify();
+    }
+
+    @Test
+    void getSupportedLanguagesDoesNotIncludeModelQueryParameter() throws Exception {
+        TranslationService service = createService("", false, "en", "bg", 50);
+        MockRestServiceServer server = bindMockServer(service);
+
+        server.expect(requestTo("https://translation.googleapis.com/v3/projects/dummy-project-id/locations/global/supportedLanguages?displayLanguageCode=en"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess("""
+                        {
+                          "languages":[
+                            {"language":"de","displayName":"German","supportSource":true,"supportTarget":true}
+                          ]
+                        }
+                        """, MediaType.APPLICATION_JSON));
+
+        List<SupportedLanguage> result = service.getSupportedLanguages();
+        assertEquals(1, result.size());
+        assertEquals("de", result.get(0).languageCode());
+        server.verify();
     }
 
     @Test

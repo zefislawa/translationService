@@ -19,6 +19,7 @@ let translationProgressLogCount = 0;
 let translationProgressState = null;
 let activeTranslationAbortController = null;
 let activeTranslationRequestId = null;
+let translationMode = "standard";
 const selectedFileByContext = { crm: '', selfService: '' };
 
 const elements = {
@@ -92,8 +93,13 @@ async function fetchUiConfig() {
   return res.json();
 }
 
+function getSelectedTranslationMode() {
+  const selected = document.querySelector('input[name="translationMode"]:checked');
+  return selected ? selected.value : 'standard';
+}
+
 async function fetchSupportedLanguages() {
-  const res = await fetch('/api/translations/supported-languages');
+  const res = await fetch(`/api/translations/supported-languages?mode=${translationMode}`);
   if (!res.ok) throw new Error(`Unable to load supported languages (HTTP ${res.status})`);
   return res.json();
 }
@@ -1099,7 +1105,8 @@ async function handleLoadFiles() {
   try {
     const supportedLanguages = await fetchSupportedLanguages();
     renderSupportedLanguages(supportedLanguages);
-    showSuccessMessage(`Loaded ${files.length} files and ${supportedLanguages.length} Google supported languages.`);
+    const languageType = translationMode === 'adaptive' ? 'Adaptive LLM supported languages' : 'Google supported languages';
+    showSuccessMessage(`Loaded ${files.length} files and ${supportedLanguages.length} ${languageType}.`);
   } catch (error) {
     console.warn(error);
     renderSupportedLanguagesUnavailable();
@@ -1178,6 +1185,7 @@ async function handleTranslate() {
     updateTranslationProgress(78, 'Validating translated file...', 'Translation completed. Validating placeholders and risky terms.');
     const deepMergeButton = document.getElementById('tabDeepMerge');
     if (deepMergeButton) deepMergeButton.style.display = 'none';
+    translationMode = getSelectedTranslationMode();
     await handleLoadFiles();
     completeTranslationProgress(
       `Completed successfully. ${Number(result.textCount || 0)} rows translated and validated.`,
@@ -1377,6 +1385,12 @@ elements.syncAdaptiveDatasetBtn.addEventListener('click', () => handleSyncAdapti
 elements.targetLanguageSelect.addEventListener('change', () => {
   targetLanguage = elements.targetLanguageSelect.value;
 });
+document.querySelectorAll('input[name="translationMode"]').forEach((radio) => {
+  radio.addEventListener('change', () => {
+    translationMode = getSelectedTranslationMode();
+    handleLoadFiles().catch((e) => alert(e.message));
+  });
+});
 elements.translateBtn.addEventListener('click', () => handleTranslate().catch((e) => alert(e.message)));
 elements.compareBtn.addEventListener('click', () => handleCompare().catch((e) => alert(e.message)));
 elements.compareStatusFilter.addEventListener('change', () => {
@@ -1459,6 +1473,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   try {
     const deepMergeButton = document.getElementById('tabDeepMerge');
     if (deepMergeButton) deepMergeButton.style.display = 'none';
+    translationMode = getSelectedTranslationMode();
     await handleLoadFiles();
     if (elements.fileSelect.value) {
       await loadRows();
