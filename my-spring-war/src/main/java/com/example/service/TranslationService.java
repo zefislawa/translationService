@@ -66,8 +66,6 @@ public class TranslationService {
     private final ObjectMapper mapper;
     private final RestTemplate restTemplate;
     private final String googleCredentialsPath;
-    private final String configuredSourceLanguage;
-    private final String configuredTargetLanguage;
     private final String googleProjectId;
     private final String googleLocation;
     private final String googleTranslationModel;
@@ -109,8 +107,6 @@ public class TranslationService {
     public TranslationService(
             @Value("${myapp.dataDir}") String defaultDataDir,
             @Value("${myapp.google.credentialsPath:}") String googleCredentialsPath,
-            @Value("${myapp.google.sourceLanguage:}") String configuredSourceLanguage,
-            @Value("${myapp.google.targetLanguage:}") String configuredTargetLanguage,
             @Value("${myapp.google.projectId}") String googleProjectId,
             @Value("${myapp.google.location:global}") String googleLocation,
             @Value("${myapp.google.model:general/translation-llm}") String googleTranslationModel,
@@ -138,8 +134,6 @@ public class TranslationService {
     ) throws Exception {
         this.defaultDataDir = Path.of(defaultDataDir).toAbsolutePath();
         this.googleCredentialsPath = googleCredentialsPath;
-        this.configuredSourceLanguage = configuredSourceLanguage;
-        this.configuredTargetLanguage = configuredTargetLanguage;
         this.googleProjectId = googleProjectId;
         this.googleLocation = googleLocation;
         this.googleTranslationModel = googleTranslationModel;
@@ -167,7 +161,6 @@ public class TranslationService {
         validateGlossaryConfiguration();
         this.mapper = mapper;
         SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
-        requestFactory.setOutputStreaming(false);
 
         this.restTemplate = restTemplateBuilder
                 .setConnectTimeout(Duration.ofSeconds(15))
@@ -2553,10 +2546,12 @@ public class TranslationService {
                 @JsonProperty("supportSource") Boolean supportSource,
                 @JsonProperty("supportTarget") Boolean supportTarget
         ) {
-            this.languageCode = languageCode;
-            this.displayName = displayName;
-            this.supportSource = Boolean.TRUE.equals(supportSource);
-            this.supportTarget = Boolean.TRUE.equals(supportTarget);
+            this(
+                    languageCode,
+                    displayName,
+                    Boolean.TRUE.equals(supportSource),
+                    Boolean.TRUE.equals(supportTarget)
+            );
         }
     }
 
