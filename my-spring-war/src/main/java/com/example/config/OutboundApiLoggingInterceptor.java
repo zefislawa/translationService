@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpRequest;
 import org.springframework.http.client.ClientHttpRequestExecution;
 import org.springframework.http.client.ClientHttpRequestInterceptor;
@@ -11,6 +12,8 @@ import org.springframework.http.client.ClientHttpResponse;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.List;
 
 public class OutboundApiLoggingInterceptor implements ClientHttpRequestInterceptor {
 
@@ -28,7 +31,7 @@ public class OutboundApiLoggingInterceptor implements ClientHttpRequestIntercept
         log.info("Outbound API request -> method={}, uri={}, headers={}, body={}",
                 request.getMethod(),
                 request.getURI(),
-                request.getHeaders(),
+                sanitizeHeaders(request.getHeaders()),
                 prettifyAndTruncateBody(body));
 
         ClientHttpResponse response = execution.execute(request, body);
@@ -39,7 +42,7 @@ public class OutboundApiLoggingInterceptor implements ClientHttpRequestIntercept
                     request.getMethod(),
                     request.getURI(),
                     response.getStatusCode(),
-                    response.getHeaders(),
+                    sanitizeHeaders(response.getHeaders()),
                     prettifyAndTruncateBody(responseBodyBytes));
 
             return new CachedBodyClientHttpResponse(response, responseBodyBytes);
@@ -70,5 +73,27 @@ public class OutboundApiLoggingInterceptor implements ClientHttpRequestIntercept
             return formatted;
         }
         return formatted.substring(0, MAX_LOG_BODY_LENGTH) + " ...<truncated>";
+    }
+
+    private HttpHeaders sanitizeHeaders(HttpHeaders headers) {
+        HttpHeaders sanitized = new HttpHeaders();
+        sanitized.putAll(headers);
+        if (sanitized.containsKey(HttpHeaders.AUTHORIZATION)) {
+            List<String> original = sanitized.get(HttpHeaders.AUTHORIZATION);
+            List<String> masked = new ArrayList<>();
+            if (original != null) {
+                for (String value : original) {
+                    if (value == null || value.isBlank()) {
+                        masked.add("<masked>");
+                    } else if (value.regionMatches(true, 0, "Bearer ", 0, 7)) {
+                        masked.add("Bearer <masked>");
+                    } else {
+                        masked.add("<masked>");
+                    }
+                }
+            }
+            sanitized.put(HttpHeaders.AUTHORIZATION, masked);
+        }
+        return sanitized;
     }
 }

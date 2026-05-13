@@ -103,6 +103,14 @@ public class TranslationService {
     private static final Set<String> DEFAULT_AMBIGUOUS_TERMS = Set.of(
             "close", "clear", "apply", "lead", "charge", "rate", "run", "view", "basket", "shopping cart"
     );
+    // Based on Google Cloud Translation "Translation LLM supported languages".
+    // Google documents this is also the supported-language set for Adaptive Translation.
+    private static final Set<String> ADAPTIVE_TRANSLATION_LANGUAGE_CODES = Set.of(
+            "ar", "bn", "bg", "ca", "zh", "zh-CN", "zh-TW", "hr", "cs", "da", "nl", "en", "et", "fi",
+            "fr", "de", "el", "gu", "he", "hi", "hu", "id", "it", "ja", "kn", "ko", "lv", "lt", "ml",
+            "mr", "no", "pl", "pt", "pt-BR", "pt-PT", "pa", "ro", "ru", "sr", "sk", "sl", "es", "sv",
+            "ta", "te", "th", "tr", "uk", "vi"
+    );
 
     public TranslationService(
             @Value("${myapp.dataDir}") String defaultDataDir,
@@ -582,8 +590,24 @@ public class TranslationService {
     }
 
     public List<SupportedLanguage> getAdaptiveTranslationSupportedLanguages() {
-        String translationLlmModel = "projects/" + googleProjectId + "/locations/" + googleLocation + "/models/general/translation-llm";
-        return getSupportedLanguages(translationLlmModel);
+        Locale displayLocale = Locale.forLanguageTag(Objects.requireNonNullElse(supportedLanguagesDisplayLocale, "en"));
+        return ADAPTIVE_TRANSLATION_LANGUAGE_CODES.stream()
+                .map(code -> new SupportedLanguage(
+                        code,
+                        toDisplayLanguage(code, displayLocale),
+                        true,
+                        true
+                ))
+                .sorted(Comparator.comparing(SupportedLanguage::displayName, String.CASE_INSENSITIVE_ORDER))
+                .toList();
+    }
+
+    private String toDisplayLanguage(String languageCode, Locale displayLocale) {
+        String displayName = Locale.forLanguageTag(languageCode).getDisplayLanguage(displayLocale);
+        if (displayName == null || displayName.isBlank()) {
+            return languageCode;
+        }
+        return displayName;
     }
 
     private List<SupportedLanguage> getSupportedLanguages(String model) {
