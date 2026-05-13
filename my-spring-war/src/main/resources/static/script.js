@@ -358,6 +358,24 @@ function renderAdaptiveDatasetFiles(files, configuredFile) {
   elements.adaptiveDatasetFileSelect.value = files.includes(configuredBaseName) ? configuredBaseName : files[0];
 }
 
+
+function detectLanguagePairFromGlossaryFile(fileName) {
+  if (!fileName) {
+    return null;
+  }
+
+  const baseName = (fileName.split(/[\/]/).pop() || '').replace(/\.csv$/i, '');
+  const match = baseName.match(/([a-z]{2,3}(?:-[a-z]{2,3})?)-([a-z]{2,3}(?:-[a-z]{2,3})?)$/i);
+  if (!match) {
+    return null;
+  }
+
+  return {
+    sourceLanguage: match[1],
+    targetLanguage: match[2]
+  };
+}
+
 function detectSourceLanguageFromSelectedFile(fileName) {
   if (!fileName) {
     return '';
@@ -1245,7 +1263,15 @@ async function handleSyncGlossary() {
     return;
   }
 
-  const selectedTargetLanguage = elements.targetLanguageSelect.value;
+  let selectedTargetLanguage = elements.targetLanguageSelect.value;
+  const glossaryLanguagePair = detectLanguagePairFromGlossaryFile(glossaryFilePath);
+  if (selectedTargetLanguage && selectedTargetLanguage.toLowerCase() === sourceLanguage.toLowerCase()
+      && glossaryLanguagePair?.targetLanguage
+      && glossaryLanguagePair.targetLanguage.toLowerCase() !== sourceLanguage.toLowerCase()) {
+    selectedTargetLanguage = glossaryLanguagePair.targetLanguage;
+    elements.targetLanguageSelect.value = selectedTargetLanguage;
+  }
+
   if (!selectedTargetLanguage) {
     alert('Please select a target language before syncing glossary.');
     return;
