@@ -39,6 +39,10 @@ const elements = {
   syncGlossaryBtn: document.getElementById('syncGlossaryBtn'),
   adaptiveDatasetFileSelect: document.getElementById('adaptiveDatasetFileSelect'),
   syncAdaptiveDatasetBtn: document.getElementById('syncAdaptiveDatasetBtn'),
+  glossaryFileGroup: document.getElementById('glossaryFileGroup'),
+  adaptiveDatasetFileGroup: document.getElementById('adaptiveDatasetFileGroup'),
+  syncGlossaryGroup: document.getElementById('syncGlossaryGroup'),
+  syncAdaptiveDatasetGroup: document.getElementById('syncAdaptiveDatasetGroup'),
   targetLanguageSelect: document.getElementById('targetLanguage'),
   translateBtn: document.getElementById('translateBtn'),
   translationForm: document.getElementById('translationForm'),
@@ -96,6 +100,20 @@ async function fetchUiConfig() {
 function getSelectedTranslationMode() {
   const selected = document.querySelector('input[name="translationMode"]:checked');
   return selected ? selected.value : 'standard';
+}
+
+
+function updateAdaptiveControlsVisibility() {
+  const shouldShowAdaptiveControls = translationMode === 'adaptive';
+  [
+    elements.glossaryFileGroup,
+    elements.adaptiveDatasetFileGroup,
+    elements.syncGlossaryGroup,
+    elements.syncAdaptiveDatasetGroup
+  ].forEach((group) => {
+    if (!group) return;
+    group.classList.toggle('hidden', !shouldShowAdaptiveControls);
+  });
 }
 
 async function fetchSupportedLanguages() {
@@ -1187,6 +1205,7 @@ async function handleTranslate() {
     const deepMergeButton = document.getElementById('tabDeepMerge');
     if (deepMergeButton) deepMergeButton.style.display = 'none';
     translationMode = getSelectedTranslationMode();
+    updateAdaptiveControlsVisibility();
     await handleLoadFiles();
     completeTranslationProgress(
       `Completed successfully. ${Number(result.textCount || 0)} rows translated and validated.`,
@@ -1389,6 +1408,7 @@ elements.targetLanguageSelect.addEventListener('change', () => {
 document.querySelectorAll('input[name="translationMode"]').forEach((radio) => {
   radio.addEventListener('change', () => {
     translationMode = getSelectedTranslationMode();
+    updateAdaptiveControlsVisibility();
     handleLoadFiles().catch((e) => alert(e.message));
   });
 });
@@ -1475,6 +1495,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const deepMergeButton = document.getElementById('tabDeepMerge');
     if (deepMergeButton) deepMergeButton.style.display = 'none';
     translationMode = getSelectedTranslationMode();
+    updateAdaptiveControlsVisibility();
     await handleLoadFiles();
     if (elements.fileSelect.value) {
       await loadRows();
