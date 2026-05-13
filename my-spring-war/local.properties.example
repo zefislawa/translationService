@@ -103,3 +103,6 @@ myapp.local.selfServiceSourceFilesDirectory=data/self-service/source
 myapp.local.selfServiceGlossaryDirectory=data/self-service/glossary
 myapp.local.selfServiceAdaptiveDatasetDirectory=data/self-service/adaptive
 myapp.local.selfServiceTranslatedJsonDirectory=data/self-service/translated
+
+# Directory where application logs are written.
+myapp.local.logDirectory=logs
