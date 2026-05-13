@@ -209,7 +209,6 @@ class TranslationServiceTest {
         TranslationService service = new TranslationService(
                 tempDir.toString(),
                 "",
-                "en",
                 "dummy-project-id",
                 "global",
                 "general/translation-llm",
@@ -440,7 +439,6 @@ class TranslationServiceTest {
     void constructorFailsFastWhenGlossaryEnabledButGlossaryConfigMissing() {
         IllegalStateException exception = assertThrows(IllegalStateException.class, () -> new TranslationService(
                 tempDir.toString(),
-                "",
                 "",
                 "dummy-project-id",
                 "global",
@@ -875,7 +873,6 @@ class TranslationServiceTest {
         return new TranslationService(
                 tempDir.toString(),
                 "",
-                sourceLanguage,
                 "dummy-project-id",
                 "global",
                 "general/translation-llm",
@@ -907,7 +904,6 @@ class TranslationServiceTest {
         return new TranslationService(
                 tempDir.toString(),
                 "",
-                "en",
                 "dummy-project-id",
                 "global",
                 "general/translation-llm",
@@ -939,7 +935,6 @@ class TranslationServiceTest {
         return new TranslationService(
                 tempDir.toString(),
                 "",
-                "en",
                 "dummy-project-id",
                 "global",
                 "general/translation-llm",
