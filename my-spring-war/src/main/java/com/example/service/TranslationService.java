@@ -421,7 +421,14 @@ public class TranslationService {
 
         String sourceLanguage = extractLanguageFromFileName(sourceFileName);
         String targetLanguage = extractLanguageFromFileName(targetFileName);
-        TranslationPipelineResult pipelineResult = runTranslationPipeline(customPath, rows, sourceLanguage, targetLanguage, null);
+        TranslationPipelineResult pipelineResult = runTranslationPipeline(
+                customPath,
+                rows,
+                sourceLanguage,
+                targetLanguage,
+                null,
+                null
+        );
         List<String> translatedTexts = pipelineResult.translatedTexts();
 
         if (translatedTexts.size() != rows.size()) {
