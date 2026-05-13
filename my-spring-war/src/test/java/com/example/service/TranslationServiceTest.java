@@ -502,26 +502,15 @@ class TranslationServiceTest {
     }
 
     @Test
-    void getAdaptiveTranslationSupportedLanguagesUsesTranslationLlmModelQueryParameter() throws Exception {
+    void getAdaptiveTranslationSupportedLanguagesUsesStaticAllowListWithoutCallingGoogleSupportedLanguages() throws Exception {
         TranslationService service = createService("", false, "en", "bg", 50);
         MockRestServiceServer server = bindMockServer(service);
 
-        server.expect(requestTo(org.hamcrest.Matchers.containsString(
-                        "supportedLanguages?displayLanguageCode=en&model=projects/dummy-project-id/locations/global/models/general/translation-llm")))
-                .andExpect(method(HttpMethod.GET))
-                .andRespond(withSuccess("""
-                        {
-                          "languages":[
-                            {"language":"fr","displayName":"French","supportSource":true,"supportTarget":true}
-                          ]
-                        }
-                        """, MediaType.APPLICATION_JSON));
-
         List<SupportedLanguage> result = service.getAdaptiveTranslationSupportedLanguages();
-        assertEquals(1, result.size());
-        assertEquals("fr", result.get(0).languageCode());
-        assertTrue(result.get(0).supportSource());
-        assertTrue(result.get(0).supportTarget());
+        assertFalse(result.isEmpty());
+        assertTrue(result.stream().anyMatch(language -> language.languageCode().equals("en")));
+        assertTrue(result.stream().allMatch(SupportedLanguage::supportSource));
+        assertTrue(result.stream().allMatch(SupportedLanguage::supportTarget));
         server.verify();
     }
 
