@@ -1,9 +1,6 @@
 # Local overrides for development
 # Copy this file to local.properties and fill in your values.
 
-# Folder that contains translation JSON files.
-myapp.local.dataDir=data
-
 # Optional path to a Google service-account JSON key used for
 # Application Default Credentials. If blank, ADC fallback applies
 # (GOOGLE_APPLICATION_CREDENTIALS env var, gcloud ADC file, or
@@ -51,7 +48,7 @@ myapp.local.uiPreferredTargetLanguage=fr
 myapp.local.referenceLanguageFile=en
 
 # Optional path to a newline-delimited list of additional risky terms.
-# Relative paths are resolved from the configured data directory.
+# Relative paths are resolved from the selected context source directory.
 myapp.local.riskyTermsFile=risky-terms.txt
 
 # Protect placeholders like {{name}} / {id} / %s before translation.
@@ -65,7 +62,7 @@ myapp.local.validationEnabled=true
 # for easier local-vs-example comparison.
 # ------------------------------------------------------------------------
 
-# Optional local glossary CSV path. Relative paths are resolved from dataDir.
+# Optional local glossary CSV path. Relative paths are resolved from the selected context source directory.
 myapp.local.googleGlossaryFile=glossary.csv
 
 # GCS bucket used to upload glossary CSV files for automated sync.
@@ -78,7 +75,7 @@ myapp.local.googleGlossaryObjectPrefix=translation-glossaries
 # Supported placeholders: {source}, {target}
 myapp.local.googleGlossaryResourceTemplate=app-glossary-{source}-{target}
 
-# Optional local adaptive dataset TSV path. Relative paths are resolved from dataDir.
+# Optional local adaptive dataset TSV path. Relative paths are resolved from the selected context source directory.
 myapp.local.googleAdaptiveDatasetFile=adaptive-dataset.tsv
 
 # GCS bucket used to upload adaptive dataset TSV files for automated sync.

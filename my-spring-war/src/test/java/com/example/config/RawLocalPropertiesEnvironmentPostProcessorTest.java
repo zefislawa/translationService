@@ -10,11 +10,11 @@ class RawLocalPropertiesEnvironmentPostProcessorTest {
 
     @Test
     void parsesSingleLineWithEscapedNewlinesBeforePropertyKeys() {
-        String raw = "myapp.local.dataDir=C:\\Users\\john\\translations\\nmyapp.local.supportedLanguagesDisplayLocale=en\\nmyapp.local.uiPreferredTargetLanguage=fr";
+        String raw = "myapp.local.crmSourceFilesDirectory=C:\\Users\\john\\translations\\nmyapp.local.supportedLanguagesDisplayLocale=en\\nmyapp.local.uiPreferredTargetLanguage=fr";
 
         Map<String, Object> parsed = RawLocalPropertiesEnvironmentPostProcessor.parseRawProperties(raw);
 
-        assertEquals("C:\\Users\\john\\translations", parsed.get("myapp.local.dataDir"));
+        assertEquals("C:\\Users\\john\\translations", parsed.get("myapp.local.crmSourceFilesDirectory"));
         assertEquals("en", parsed.get("myapp.local.supportedLanguagesDisplayLocale"));
         assertEquals("fr", parsed.get("myapp.local.uiPreferredTargetLanguage"));
     }
