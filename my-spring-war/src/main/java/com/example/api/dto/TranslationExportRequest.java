@@ -7,6 +7,7 @@ public class TranslationExportRequest {
     private String context;
     private String fileName;
     private String targetLanguage;
+    private String mode;
     private List<TranslationRow> rows;
 
 
@@ -39,6 +40,14 @@ public class TranslationExportRequest {
 
     public void setTargetLanguage(String targetLanguage) {
         this.targetLanguage = targetLanguage;
+    }
+
+    public String getMode() {
+        return mode;
+    }
+
+    public void setMode(String mode) {
+        this.mode = mode;
     }
 
     public List<TranslationRow> getRows() {

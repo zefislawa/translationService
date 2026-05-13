@@ -313,7 +313,7 @@ public class TranslationService {
     }
 
     public TranslationExportResult translateAndStore(String customPath, String fileName, String targetLanguage, List<TranslationRow> rows) throws Exception {
-        return translateAndStore(customPath, fileName, targetLanguage, rows, null);
+        return translateAndStore(customPath, fileName, targetLanguage, rows, "adaptive", null);
     }
 
     public TranslationExportResult translateAndStore(
@@ -321,6 +321,7 @@ public class TranslationService {
             String fileName,
             String targetLanguage,
             List<TranslationRow> rows,
+            String translationMode,
             String translationRequestId
     ) throws Exception {
         if (rows == null || rows.isEmpty()) {
@@ -337,6 +338,7 @@ public class TranslationService {
                 rows,
                 sourceLanguage,
                 targetLanguage,
+                translationMode,
                 translationRequestId
         );
         List<String> translatedTexts = pipelineResult.translatedTexts();
@@ -626,6 +628,7 @@ public class TranslationService {
             List<TranslationRow> rows,
             String sourceLanguage,
             String targetLanguage,
+            String translationMode,
             String translationRequestId
     ) {
         throwIfTranslationCancelled(translationRequestId);
@@ -647,7 +650,7 @@ public class TranslationService {
                         item.metadata().riskReason()
                 ))
                 .toList()
-                : translateByRouteV1(sourceLanguage, targetLanguage, protectedItems, translationRequestId);
+                : translateByMode(sourceLanguage, targetLanguage, protectedItems, translationMode, translationRequestId);
         List<String> translatedProtectedTexts = translatedItems.stream()
                 .sorted(Comparator.comparingInt(TranslatedItemResult::index))
                 .map(TranslatedItemResult::translatedText)
@@ -798,6 +801,7 @@ public class TranslationService {
             String targetLanguage,
             List<PreparedTranslationItem> items,
             String adaptiveDataset,
+            boolean useAdvancedLlm,
             String translationRequestId
     ) {
         requireGoogleProjectId();
@@ -841,6 +845,7 @@ public class TranslationService {
                     sourceLanguage,
                     targetLanguage,
                     adaptiveDataset,
+                    useAdvancedLlm,
                     contents,
                     start,
                     end,
@@ -856,7 +861,9 @@ public class TranslationService {
         }
         String routeUsed = useAdaptiveDataset
                 ? "google-translation-advanced/adaptiveMtTranslate"
-                : "google-translation-advanced/translateText/translation-llm";
+                : useAdvancedLlm
+                ? "google-translation-advanced/translateText/translation-llm"
+                : "google-translation-standard/translateText/nmt";
         return new GoogleTranslationBatchResult(allTranslations, routeUsed);
     }
 
@@ -866,6 +873,7 @@ public class TranslationService {
             String sourceLanguage,
             String targetLanguage,
             String adaptiveDataset,
+            boolean useAdvancedLlm,
             List<String> contents,
             int start,
             int end,
@@ -879,8 +887,8 @@ public class TranslationService {
                         sourceLanguage,
                         targetLanguage,
                         "text/plain",
-                        googleTranslationModel,
-                        resolveGlossaryConfig(sourceLanguage, targetLanguage)
+                        useAdvancedLlm ? googleTranslationModel : null,
+                        useAdvancedLlm ? resolveGlossaryConfig(sourceLanguage, targetLanguage) : null
                 );
         try {
             ResponseEntity<GoogleTranslateTextResponse> response = executeTranslateBatchWithRetry(
@@ -918,6 +926,7 @@ public class TranslationService {
                         sourceLanguage,
                         targetLanguage,
                         adaptiveDataset,
+                        useAdvancedLlm,
                         contents.subList(0, middle),
                         start,
                         splitPoint,
@@ -929,6 +938,7 @@ public class TranslationService {
                         sourceLanguage,
                         targetLanguage,
                         adaptiveDataset,
+                        useAdvancedLlm,
                         contents.subList(middle, contents.size()),
                         splitPoint,
                         end,
@@ -973,6 +983,7 @@ public class TranslationService {
                     googleTargetLanguage,
                     adaptiveCandidates,
                     adaptiveDataset,
+                    true,
                     translationRequestId
             );
             for (int i = 0; i < adaptiveCandidates.size(); i++) {
@@ -994,6 +1005,7 @@ public class TranslationService {
                     googleTargetLanguage,
                     llmCandidates,
                     null,
+                    true,
                     translationRequestId
             );
             for (int i = 0; i < llmCandidates.size(); i++) {
@@ -1015,6 +1027,50 @@ public class TranslationService {
         return translatedByIndex.values().stream()
                 .sorted(Comparator.comparingInt(TranslatedItemResult::index))
                 .toList();
+    }
+
+    private List<TranslatedItemResult> translateByMode(
+            String sourceLanguage,
+            String targetLanguage,
+            List<PreparedTranslationItem> items,
+            String translationMode,
+            String translationRequestId
+    ) {
+        if ("standard".equalsIgnoreCase(translationMode)) {
+            return translateByStandardNmtRoute(sourceLanguage, targetLanguage, items, translationRequestId);
+        }
+        return translateByRouteV1(sourceLanguage, targetLanguage, items, translationRequestId);
+    }
+
+    private List<TranslatedItemResult> translateByStandardNmtRoute(
+            String sourceLanguage,
+            String targetLanguage,
+            List<PreparedTranslationItem> items,
+            String translationRequestId
+    ) {
+        String googleSourceLanguage = normalizeGoogleLanguageCodeOrThrow(sourceLanguage, "sourceLanguage");
+        String googleTargetLanguage = normalizeGoogleLanguageCodeOrThrow(targetLanguage, "targetLanguage");
+        GoogleTranslationBatchResult nmtTranslations = callGoogleTranslationRoute(
+                googleSourceLanguage,
+                googleTargetLanguage,
+                items,
+                null,
+                false,
+                translationRequestId
+        );
+        List<TranslatedItemResult> translatedItems = new ArrayList<>(items.size());
+        for (int i = 0; i < items.size(); i++) {
+            PreparedTranslationItem item = items.get(i);
+            translatedItems.add(new TranslatedItemResult(
+                    item.item().index(),
+                    item.item().fullKey(),
+                    nmtTranslations.translatedTexts().get(i),
+                    nmtTranslations.routeUsed(),
+                    item.metadata().risky(),
+                    item.metadata().riskReason()
+            ));
+        }
+        return translatedItems;
     }
 
     private ResponseEntity<GoogleTranslateTextResponse> executeTranslateBatchWithRetry(

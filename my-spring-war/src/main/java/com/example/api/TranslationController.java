@@ -114,6 +114,7 @@ public class TranslationController {
                     request.getFileName(),
                     request.getTargetLanguage(),
                     request.getRows(),
+                    request.getMode(),
                     translationRequestId
             );
             copyTranslatedFileToContextDirectory(result.getOutputFile(), request.getContext());
