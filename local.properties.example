@@ -91,3 +91,6 @@ myapp.local.googleAdaptiveDatasetResourceTemplate=app-adaptive-{source}-{target}
 # Enable adaptive dataset usage during translation.
 # Set to false to translate using glossary/LLM path only.
 myapp.local.googleAdaptiveDatasetEnabled=true
+
+# Directory where application logs are written.
+myapp.local.logDirectory=logs
