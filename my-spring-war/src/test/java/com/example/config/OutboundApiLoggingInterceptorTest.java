@@ -5,11 +5,13 @@ import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import java.lang.reflect.Method;
+import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class OutboundApiLoggingInterceptorTest {
 
@@ -44,5 +46,24 @@ class OutboundApiLoggingInterceptorTest {
 
         assertFalse(sanitized.contains("sk-secret"));
         assertFalse(sanitized.contains("ya29.google-token"));
+    }
+
+    @Test
+    void prettifyAndTruncateBodyRepairsUtf8BodyDecodedWithLegacyCharset() throws Exception {
+        OutboundApiLoggingInterceptor interceptor = new OutboundApiLoggingInterceptor(new ObjectMapper());
+        Method prettifyAndTruncateBody = OutboundApiLoggingInterceptor.class.getDeclaredMethod("prettifyAndTruncateBody", byte[].class, MediaType.class);
+        prettifyAndTruncateBody.setAccessible(true);
+
+        String body = "{\"finalText\":\"Преглед на роли\"}";
+        MediaType legacyCharsetJson = new MediaType(MediaType.APPLICATION_JSON, Charset.forName("IBM850"));
+
+        String formatted = (String) prettifyAndTruncateBody.invoke(
+                interceptor,
+                body.getBytes(StandardCharsets.UTF_8),
+                legacyCharsetJson
+        );
+
+        assertFalse(formatted.contains("ðƒ"));
+        assertTrue(formatted.contains("\"finalText\" : \"Преглед на роли\""));
     }
 }

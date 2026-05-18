@@ -65,7 +65,7 @@ public class OutboundApiLoggingInterceptor implements ClientHttpRequestIntercept
         Charset charset = contentType != null && contentType.getCharset() != null
                 ? contentType.getCharset()
                 : StandardCharsets.UTF_8;
-        String raw = new String(body, charset);
+        String raw = LogBodyTextDecoder.decode(body, charset);
         String formatted = raw;
         try {
             Object json = objectMapper.readTree(raw);
