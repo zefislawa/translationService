@@ -8,6 +8,7 @@ import com.example.api.dto.TranslationExportResult;
 import com.example.api.dto.TranslationFileLoadRequest;
 import com.example.api.dto.TranslationReviewRequest;
 import com.example.api.dto.TranslationReviewResponse;
+import com.example.api.dto.OpenAiCostEstimateResponse;
 import com.example.api.dto.GlossarySyncRequest;
 import com.example.api.dto.GlossarySyncResponse;
 import com.example.api.dto.AdaptiveDatasetSyncRequest;
@@ -163,6 +164,16 @@ public class TranslationController {
     @PostMapping("/review")
     public TranslationReviewResponse reviewTranslations(@RequestBody TranslationReviewRequest request) {
         return openAiTranslationReviewService.reviewTranslations(
+                request.getSourceLanguage(),
+                request.getTargetLanguage(),
+                request.getContext(),
+                request.getItems()
+        );
+    }
+
+    @PostMapping("/review/estimate-cost")
+    public OpenAiCostEstimateResponse estimateOpenAiCost(@RequestBody TranslationReviewRequest request) {
+        return openAiTranslationReviewService.estimateCost(
                 request.getSourceLanguage(),
                 request.getTargetLanguage(),
                 request.getContext(),

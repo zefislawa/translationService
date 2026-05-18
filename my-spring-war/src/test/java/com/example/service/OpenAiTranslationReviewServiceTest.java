@@ -15,6 +15,7 @@ import org.springframework.test.web.client.ExpectedCount;
 import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.web.client.RestTemplate;
 
+import java.math.BigDecimal;
 import java.lang.reflect.Field;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -177,7 +178,72 @@ class OpenAiTranslationReviewServiceTest {
         server.verify();
     }
 
+    @Test
+    void estimatesTokensWithFallbackCharacterCountDividedByFour() {
+        assertEquals(0, OpenAiTranslationReviewService.estimateTokens(""));
+        assertEquals(1, OpenAiTranslationReviewService.estimateTokens("a"));
+        assertEquals(1, OpenAiTranslationReviewService.estimateTokens("abcd"));
+        assertEquals(2, OpenAiTranslationReviewService.estimateTokens("abcde"));
+    }
+
+    @Test
+    void calculatesCostFromConfiguredInputCachedInputAndOutputPrices() {
+        OpenAiTranslationReviewService service = newService(
+                true, "gpt-5.4", 100, 3, 1,
+                "2.00", "0.50", "8.00", "0"
+        );
+
+        BigDecimal cost = service.calculateCost(1_000_000, 250_000, 500_000);
+
+        assertEquals(new BigDecimal("5.625000000000"), cost);
+    }
+
+    @Test
+    void estimatesOnlyItemsProvidedBySelectedRows() {
+        OpenAiTranslationReviewService service = newService(
+                true, "gpt-5.4", 100, 3, 1,
+                "1.00", "0.00", "1.00", "0"
+        );
+
+        var estimate = service.estimateCost("en", "bg", "crm", List.of(
+                item("selected.one", "One", "Ð•Ð´Ð½Ð¾"),
+                item("selected.two", "Two", "Ð”Ð²Ðµ")
+        ));
+
+        assertEquals(2, estimate.getSelectedStringCount());
+        assertTrue(estimate.getInputTokens() > 0);
+        assertTrue(estimate.getOutputTokens() > 0);
+    }
+
+    @Test
+    void warnsWhenEstimatedCostExceedsConfiguredThreshold() {
+        OpenAiTranslationReviewService service = newService(
+                true, "gpt-5.4", 100, 3, 1,
+                "1000.00", "0.00", "1000.00", "0.000001"
+        );
+
+        var estimate = service.estimateCost("en", "bg", "crm",
+                List.of(item("PayNow", "Pay Now", "ÐŸÐ»Ð°Ñ‚Ð¸ ÑÐµÐ³Ð°")));
+
+        assertTrue(estimate.isThresholdExceeded());
+        assertThat(estimate.getWarningMessage(), containsString("exceeds the configured threshold"));
+    }
+
     private OpenAiTranslationReviewService newService(boolean enabled, String model, int batchSize, int retries, long backoffMs) {
+        return newService(enabled, model, batchSize, retries, backoffMs, "0", "0", "0", "0");
+    }
+
+    private OpenAiTranslationReviewService newService(
+            boolean enabled,
+            String model,
+            int batchSize,
+            int retries,
+            long backoffMs,
+            String inputPricePer1M,
+            String cachedInputPricePer1M,
+            String outputPricePer1M,
+            String maxEstimatedCostUsd
+    ) {
         return new OpenAiTranslationReviewService(
                 enabled,
                 "test-key",
@@ -192,6 +258,10 @@ class OpenAiTranslationReviewServiceTest {
                 "low",
                 "low",
                 tempDir.resolve("openai-report.csv").toString(),
+                new BigDecimal(inputPricePer1M),
+                new BigDecimal(cachedInputPricePer1M),
+                new BigDecimal(outputPricePer1M),
+                new BigDecimal(maxEstimatedCostUsd),
                 mapper,
                 new RestTemplateBuilder()
         );
