@@ -13,9 +13,12 @@ import org.springframework.http.client.BufferingClientHttpRequestFactory;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
+import org.springframework.web.client.HttpStatusCodeException;
+import org.springframework.web.client.ResourceAccessException;
 
 import java.time.Duration;
 import java.util.*;
+import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -30,6 +33,9 @@ public class OpenAiTranslationReviewService {
     private final String baseUrl;
     private final int maxBatchSize;
     private final boolean failOnError;
+    private final int maxRetries;
+    private final long retryBackoffMs;
+    private final int maxConcurrentRequests;
     private final String reasoningEffort;
     private final String verbosity;
     private final ObjectMapper mapper;
@@ -43,6 +49,9 @@ public class OpenAiTranslationReviewService {
             @Value("${openai.timeout-seconds:60}") int timeoutSeconds,
             @Value("${openai.max-batch-size:100}") int maxBatchSize,
             @Value("${openai.fail-on-error:false}") boolean failOnError,
+            @Value("${openai.max-retries:3}") int maxRetries,
+            @Value("${openai.retry-backoff-ms:1000}") long retryBackoffMs,
+            @Value("${openai.max-concurrent-requests:1}") int maxConcurrentRequests,
             @Value("${openai.reasoning-effort:low}") String reasoningEffort,
             @Value("${openai.verbosity:low}") String verbosity,
             ObjectMapper mapper,
@@ -54,6 +63,9 @@ public class OpenAiTranslationReviewService {
         this.baseUrl = baseUrl;
         this.maxBatchSize = Math.max(1, maxBatchSize);
         this.failOnError = failOnError;
+        this.maxRetries = Math.max(1, maxRetries);
+        this.retryBackoffMs = Math.max(1L, retryBackoffMs);
+        this.maxConcurrentRequests = Math.max(1, maxConcurrentRequests);
         this.reasoningEffort = reasoningEffort;
         this.verbosity = verbosity;
         this.mapper = mapper;
@@ -75,6 +87,9 @@ public class OpenAiTranslationReviewService {
         }
 
         List<ReviewedTranslationItem> reviewed = new ArrayList<>();
+        if (maxConcurrentRequests > 1) {
+            log.info("openai.max-concurrent-requests={} configured; current implementation processes sequentially.", maxConcurrentRequests);
+        }
         for (int i = 0; i < items.size(); i += maxBatchSize) {
             List<TranslationReviewItem> batch = items.subList(i, Math.min(items.size(), i + maxBatchSize));
             reviewed.addAll(reviewBatch(sourceLanguage, targetLanguage, context, batch));
@@ -90,7 +105,7 @@ public class OpenAiTranslationReviewService {
             headers.setContentType(MediaType.APPLICATION_JSON);
             headers.setBearerAuth(apiKey);
             Map<String, Object> body = buildRequest(sourceLanguage, targetLanguage, context, batch);
-            ResponseEntity<JsonNode> entity = restTemplate.postForEntity(baseUrl + "/responses", new HttpEntity<>(body, headers), JsonNode.class);
+            ResponseEntity<JsonNode> entity = executeWithRetry(headers, body, batch.size());
             List<ReviewedTranslationItem> parsed = parseResponse(entity.getBody(), batch);
             logUsage(entity.getBody(), batch.size(), parsed);
             return parsed;
@@ -100,6 +115,45 @@ public class OpenAiTranslationReviewService {
                 throw ex;
             }
             return toFallbackItems(batch);
+        }
+    }
+
+    private ResponseEntity<JsonNode> executeWithRetry(HttpHeaders headers, Map<String, Object> body, int batchSize) {
+        int attempt = 1;
+        while (true) {
+            try {
+                return restTemplate.postForEntity(baseUrl + "/responses", new HttpEntity<>(body, headers), JsonNode.class);
+            } catch (Exception ex) {
+                boolean retryable = isRetryable(ex);
+                if (!retryable || attempt >= maxRetries) {
+                    throw ex;
+                }
+                long backoff = retryBackoffMs * (1L << (attempt - 1));
+                log.warn("Retrying OpenAI review batch after transient failure attempt={} batchSize={} retryInMs={}",
+                        attempt, batchSize, backoff);
+                sleep(backoff);
+                attempt++;
+            }
+        }
+    }
+
+    private boolean isRetryable(Exception ex) {
+        if (ex instanceof ResourceAccessException) {
+            return true;
+        }
+        if (ex instanceof HttpStatusCodeException httpEx) {
+            int status = httpEx.getStatusCode().value();
+            return status == 429 || status == 500 || status == 502 || status == 503 || status == 504;
+        }
+        return false;
+    }
+
+    private void sleep(long delayMs) {
+        try {
+            TimeUnit.MILLISECONDS.sleep(delayMs);
+        } catch (InterruptedException interruptedException) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("Interrupted while waiting to retry OpenAI request", interruptedException);
         }
     }
 
