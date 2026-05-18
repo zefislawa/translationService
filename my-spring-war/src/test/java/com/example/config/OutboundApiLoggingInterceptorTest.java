@@ -3,6 +3,7 @@ package com.example.config;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
 import java.lang.reflect.Method;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
@@ -29,7 +30,7 @@ class OutboundApiLoggingInterceptorTest {
     @Test
     void prettifyAndTruncateBodyMasksBearerTokensAndOpenAiApiKeys() throws Exception {
         OutboundApiLoggingInterceptor interceptor = new OutboundApiLoggingInterceptor(new ObjectMapper());
-        Method prettifyAndTruncateBody = OutboundApiLoggingInterceptor.class.getDeclaredMethod("prettifyAndTruncateBody", byte[].class);
+        Method prettifyAndTruncateBody = OutboundApiLoggingInterceptor.class.getDeclaredMethod("prettifyAndTruncateBody", byte[].class, MediaType.class);
         prettifyAndTruncateBody.setAccessible(true);
 
         String body = """
@@ -39,7 +40,7 @@ class OutboundApiLoggingInterceptorTest {
                 }
                 """;
 
-        String sanitized = (String) prettifyAndTruncateBody.invoke(interceptor, body.getBytes(StandardCharsets.UTF_8));
+        String sanitized = (String) prettifyAndTruncateBody.invoke(interceptor, body.getBytes(StandardCharsets.UTF_8), MediaType.APPLICATION_JSON);
 
         assertFalse(sanitized.contains("sk-secret"));
         assertFalse(sanitized.contains("ya29.google-token"));

@@ -169,7 +169,7 @@ public class OpenAiTranslationReviewService {
         String instruction = """
                 You are a localization QA reviewer for software UI strings.
 
-                Review Google-translated strings against the original English source and product context.
+                Review Google-translated strings against the original OpenAI English (UK) source and telecom system/UI product context.
                 Improve only when needed.
 
                 Rules:
@@ -185,7 +185,7 @@ public class OpenAiTranslationReviewService {
                 - Return only JSON matching the schema.
                 """;
         TranslationReviewRequest request = new TranslationReviewRequest();
-        request.setSourceLanguage(sourceLanguage);
+        request.setSourceLanguage(normalizeSourceLanguage(sourceLanguage));
         request.setTargetLanguage(targetLanguage);
         request.setContext(context);
         request.setItems(batch);
@@ -229,6 +229,13 @@ public class OpenAiTranslationReviewService {
         ));
         payload.put("max_output_tokens", 8000);
         return payload;
+    }
+
+    private String normalizeSourceLanguage(String sourceLanguage) {
+        if (sourceLanguage == null || sourceLanguage.isBlank()) {
+            return "en-GB";
+        }
+        return sourceLanguage.equalsIgnoreCase("en") ? "en-GB" : sourceLanguage;
     }
 
     private List<ReviewedTranslationItem> parseResponse(JsonNode body, List<TranslationReviewItem> batch) {
