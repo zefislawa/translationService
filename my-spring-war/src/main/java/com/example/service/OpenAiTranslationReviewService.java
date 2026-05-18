@@ -96,7 +96,24 @@ public class OpenAiTranslationReviewService {
     }
 
     private Map<String, Object> buildRequest(String sourceLanguage, String targetLanguage, String context, List<TranslationReviewItem> batch) {
-        String instruction = "Review translations and improve only when needed. Preserve placeholders and tags exactly. Keep meaning unchanged and tone natural for target language.";
+        String instruction = """
+                You are a localization QA reviewer for software UI strings.
+
+                Review Google-translated strings against the original English source and product context.
+                Improve only when needed.
+
+                Rules:
+                - Preserve the original meaning.
+                - Keep the translation suitable for software UI.
+                - Keep wording concise and natural.
+                - Preserve placeholders exactly, including {0}, {1}, {{count}}, %s, %d.
+                - Preserve HTML tags exactly.
+                - Preserve ICU/plural/message syntax exactly.
+                - Do not translate product names, technical identifiers, resource keys, or code-like values.
+                - Do not invent extra meaning.
+                - If the translation is already good, return it unchanged.
+                - Return only JSON matching the schema.
+                """;
         TranslationReviewRequest request = new TranslationReviewRequest();
         request.setSourceLanguage(sourceLanguage);
         request.setTargetLanguage(targetLanguage);
@@ -104,32 +121,36 @@ public class OpenAiTranslationReviewService {
         request.setItems(batch);
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("model", model);
+        payload.put("store", false);
         payload.put("reasoning", Map.of("effort", reasoningEffort));
-        payload.put("text", Map.of("verbosity", verbosity));
-        payload.put("response_format", Map.of(
-                "type", "json_schema",
-                "name", "translation_review_response",
-                "schema", Map.of(
-                        "type", "object",
-                        "additionalProperties", false,
-                        "properties", Map.of(
-                                "items", Map.of(
-                                        "type", "array",
+        payload.put("text", Map.of(
+                "verbosity", verbosity,
+                "format", Map.of(
+                        "type", "json_schema",
+                        "name", "translation_review_result",
+                        "strict", true,
+                        "schema", Map.of(
+                                "type", "object",
+                                "additionalProperties", false,
+                                "properties", Map.of(
                                         "items", Map.of(
-                                                "type", "object",
-                                                "additionalProperties", false,
-                                                "properties", Map.of(
-                                                        "key", Map.of("type", "string"),
-                                                        "finalText", Map.of("type", "string"),
-                                                        "changed", Map.of("type", "boolean"),
-                                                        "reason", Map.of("type", "string"),
-                                                        "issues", Map.of("type", "array", "items", Map.of("type", "string"))
-                                                ),
-                                                "required", List.of("key", "finalText", "changed", "reason", "issues")
+                                                "type", "array",
+                                                "items", Map.of(
+                                                        "type", "object",
+                                                        "additionalProperties", false,
+                                                        "properties", Map.of(
+                                                                "key", Map.of("type", "string"),
+                                                                "finalText", Map.of("type", "string"),
+                                                                "changed", Map.of("type", "boolean"),
+                                                                "reason", Map.of("type", "string"),
+                                                                "issues", Map.of("type", "array", "items", Map.of("type", "string"))
+                                                        ),
+                                                        "required", List.of("key", "finalText", "changed", "reason", "issues")
+                                                )
                                         )
-                                )
-                        ),
-                        "required", List.of("items")
+                                ),
+                                "required", List.of("items")
+                        )
                 )
         ));
         payload.put("input", List.of(
