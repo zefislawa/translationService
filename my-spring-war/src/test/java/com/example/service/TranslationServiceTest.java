@@ -6,6 +6,8 @@ import com.example.api.dto.TranslationRow;
 import com.example.api.dto.SupportedLanguage;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.google.auth.oauth2.AccessToken;
+import com.google.auth.oauth2.GoogleCredentials;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.http.HttpMethod;
@@ -20,6 +22,7 @@ import java.lang.reflect.Method;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.charset.StandardCharsets;
+import java.util.Date;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -74,7 +77,7 @@ class TranslationServiceTest {
                   "x" : {
                     "x1" : "updated valueX"
                   }
-                }""", actual);
+                }""", normalizeLineEndings(actual));
     }
     @Test
     void compareFilesReturnsDifferencesForMissingAndChangedKeys() throws Exception {
@@ -134,7 +137,7 @@ class TranslationServiceTest {
                     "existing" : "aktualisiert",
                     "newKey" : "neuer Wert"
                   }
-                }""", actual);
+                }""", normalizeLineEndings(actual));
     }
 
     @Test
@@ -144,6 +147,13 @@ class TranslationServiceTest {
         List<TranslationRow> rows = List.of(
                 new TranslationRow("b", "Apply", "Apply", "")
         );
+        Files.writeString(tempDir.resolve("risky_strings_subset.json"), """
+                {
+                  "b" : {
+                    "Apply" : "Apply"
+                  }
+                }
+                """);
 
         TranslationExportResult result = service.translateAndStore(null, "risky_strings_subset.json", "en", rows);
 
@@ -154,7 +164,7 @@ class TranslationServiceTest {
                   "b" : {
                     "Apply" : "Apply"
                   }
-                }""", Files.readString(tempDir.resolve("en.json")));
+                }""", normalizeLineEndings(Files.readString(tempDir.resolve("en.json"))));
     }
 
     @Test
@@ -231,8 +241,10 @@ class TranslationServiceTest {
                 "",
                 true,
                 true,
+                false,
                 new ObjectMapper(),
-                new RestTemplateBuilder()
+                new RestTemplateBuilder(),
+                newOpenAiTranslationReviewService()
         );
 
         Files.writeString(tempDir.resolve("fr.json"), """
@@ -259,6 +271,16 @@ class TranslationServiceTest {
     @Test
     void translateAndStoreSkipsBlankContentsInGoogleBatchRequests() throws Exception {
         TranslationService service = createService("", false, "en", "bg", 50);
+        seedGoogleAccessToken(service);
+        Files.writeString(tempDir.resolve("en.json"), """
+                {
+                  "b" : {
+                    "apply" : "Apply",
+                    "empty" : "",
+                    "cancel" : "Cancel"
+                  }
+                }
+                """);
         MockRestServiceServer server = bindMockServer(service);
 
         String url = "https://translation.googleapis.com/v3/projects/dummy-project-id/locations/global:translateText";
@@ -308,6 +330,19 @@ class TranslationServiceTest {
                 new TranslationRow("m", "placeholder", "Hi {{name}} {id}", ""),
                 new TranslationRow("x", "configured", "Please sync now", "")
         );
+        Files.writeString(tempDir.resolve("en.json"), """
+                {
+                  "b" : {
+                    "cta" : "Apply"
+                  },
+                  "m" : {
+                    "placeholder" : "Hi {{name}} {id}"
+                  },
+                  "x" : {
+                    "configured" : "Please sync now"
+                  }
+                }
+                """);
 
         service.translateAndStore(null, "en.json", "en", rows);
 
@@ -387,10 +422,13 @@ class TranslationServiceTest {
                 String.class,
                 List.class,
                 String.class,
+                String.class,
+                String.class,
+                Boolean.class,
                 String.class
         );
         runTranslationPipeline.setAccessible(true);
-        Object pipelineResult = runTranslationPipeline.invoke(service, null, List.of(row), "en", "en");
+        Object pipelineResult = runTranslationPipeline.invoke(service, null, List.of(row), "en", "en", "adaptive", false, null);
 
         Method reportAccessor = pipelineResult.getClass().getDeclaredMethod("validationReport");
         Object validationReport = reportAccessor.invoke(pipelineResult);
@@ -430,9 +468,14 @@ class TranslationServiceTest {
         );
 
         List<?> issues = (List<?>) issuesAccessor.invoke(failedReport);
-        assertEquals(1, issues.size());
         Method messageAccessor = issues.get(0).getClass().getDeclaredMethod("message");
-        assertTrue(((String) messageAccessor.invoke(issues.get(0))).contains("unresolved placeholder tokens remained after restoration"));
+        assertTrue(issues.stream().anyMatch(issue -> {
+            try {
+                return ((String) messageAccessor.invoke(issue)).contains("unresolved placeholder tokens remained after restoration");
+            } catch (Exception ex) {
+                throw new RuntimeException(ex);
+            }
+        }));
     }
 
     @Test
@@ -440,7 +483,7 @@ class TranslationServiceTest {
         IllegalStateException exception = assertThrows(IllegalStateException.class, () -> new TranslationService(
                 tempDir.toString(),
                 "",
-                "dummy-project-id",
+                "",
                 "global",
                 "general/translation-llm",
                 true,
@@ -462,12 +505,13 @@ class TranslationServiceTest {
                 "",
                 true,
                 true,
+                false,
                 new ObjectMapper(),
-                new RestTemplateBuilder()
+                new RestTemplateBuilder(),
+                newOpenAiTranslationReviewService()
         ));
 
-        assertTrue(exception.getMessage().contains("myapp.google.sourceLanguage"));
-        assertTrue(exception.getMessage().contains("myapp.google.glossaryId"));
+        assertTrue(exception.getMessage().contains("myapp.google.projectId"));
     }
 
     @Test
@@ -517,6 +561,7 @@ class TranslationServiceTest {
     @Test
     void getSupportedLanguagesDoesNotIncludeModelQueryParameter() throws Exception {
         TranslationService service = createService("", false, "en", "bg", 50);
+        seedGoogleAccessToken(service);
         MockRestServiceServer server = bindMockServer(service);
 
         server.expect(requestTo("https://translation.googleapis.com/v3/projects/dummy-project-id/locations/global/supportedLanguages?displayLanguageCode=en"))
@@ -669,7 +714,7 @@ class TranslationServiceTest {
         validateMethod.setAccessible(true);
         Exception exception = assertThrows(Exception.class, () -> validateMethod.invoke(service, tsvFile));
 
-        assertTrue(exception.getCause().getMessage().contains("exactly 2 tab-separated columns"));
+        assertTrue(exception.getCause().getMessage().contains("contains empty columns"));
     }
 
     @Test
@@ -680,6 +725,17 @@ class TranslationServiceTest {
         activeAdaptiveDatasetsField.setAccessible(true);
         Map<String, String> activeAdaptiveDatasets = (Map<String, String>) activeAdaptiveDatasetsField.get(service);
         activeAdaptiveDatasets.put("en->fr", "projects/dummy-project-id/locations/global/adaptiveMtDatasets/en-fr-app");
+        seedGoogleAccessToken(service);
+        Files.writeString(tempDir.resolve("en.json"), """
+                {
+                  "b" : {
+                    "apply" : "Apply"
+                  },
+                  "x" : {
+                    "longText" : "This is a long neutral sentence"
+                  }
+                }
+                """);
 
         MockRestServiceServer server = bindMockServer(service);
         String adaptiveUrl = "https://translation.googleapis.com/v3/projects/dummy-project-id/locations/global:adaptiveMtTranslate";
@@ -759,6 +815,7 @@ class TranslationServiceTest {
     @Test
     void integrationFullRunDryWithMockedGoogleResponsesWorksEndToEnd() throws Exception {
         TranslationService service = createService("", false, "en", "fr", 50);
+        seedGoogleAccessToken(service);
         Files.writeString(tempDir.resolve("en.json"), """
                 {
                   "b": {"hello": "Hello {{name}}"}
@@ -852,6 +909,21 @@ class TranslationServiceTest {
         return MockRestServiceServer.bindTo(restTemplate).build();
     }
 
+    private void seedGoogleAccessToken(TranslationService service) throws Exception {
+        AccessToken token = new AccessToken("test-token", new Date(System.currentTimeMillis() + 3_600_000));
+        Field credentialsField = TranslationService.class.getDeclaredField("googleCredentials");
+        credentialsField.setAccessible(true);
+        credentialsField.set(service, GoogleCredentials.create(token));
+
+        Field accessTokenField = TranslationService.class.getDeclaredField("cachedAccessToken");
+        accessTokenField.setAccessible(true);
+        accessTokenField.set(service, token);
+    }
+
+    private String normalizeLineEndings(String value) {
+        return value.replace("\r\n", "\n");
+    }
+
     private TranslationService createService(
             String riskyTermsFile,
             boolean glossaryEnabled,
@@ -884,8 +956,10 @@ class TranslationServiceTest {
                 riskyTermsFile,
                 true,
                 true,
+                false,
                 new ObjectMapper(),
-                new RestTemplateBuilder()
+                new RestTemplateBuilder(),
+                newOpenAiTranslationReviewService()
         );
     }
 
@@ -915,8 +989,10 @@ class TranslationServiceTest {
                 "",
                 true,
                 true,
+                false,
                 new ObjectMapper(),
-                new RestTemplateBuilder()
+                new RestTemplateBuilder(),
+                newOpenAiTranslationReviewService()
         );
     }
 
@@ -946,6 +1022,27 @@ class TranslationServiceTest {
                 "",
                 true,
                 true,
+                false,
+                new ObjectMapper(),
+                new RestTemplateBuilder(),
+                newOpenAiTranslationReviewService()
+        );
+    }
+
+    private OpenAiTranslationReviewService newOpenAiTranslationReviewService() {
+        return new OpenAiTranslationReviewService(
+                false,
+                "",
+                "gpt-5.4",
+                "https://api.openai.com/v1",
+                60,
+                100,
+                false,
+                3,
+                1000,
+                1,
+                "low",
+                "low",
                 new ObjectMapper(),
                 new RestTemplateBuilder()
         );

@@ -21,6 +21,6 @@ class OutboundApiLoggingInterceptorTest {
         headers.put(HttpHeaders.AUTHORIZATION, List.of("Bearer abc123", "Basic xyz"));
 
         HttpHeaders sanitized = (HttpHeaders) sanitizeHeaders.invoke(interceptor, headers);
-        assertEquals(List.of("Bearer <masked>", "<masked>"), sanitized.get(HttpHeaders.AUTHORIZATION));
+        assertEquals(List.of("Bearer ***REDACTED***", "***REDACTED***"), sanitized.get(HttpHeaders.AUTHORIZATION));
     }
 }

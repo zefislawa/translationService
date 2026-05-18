@@ -69,6 +69,10 @@ public class OutboundApiLoggingInterceptor implements ClientHttpRequestIntercept
             // Keep the raw body when it is not valid JSON.
         }
 
+        formatted = formatted
+                .replaceAll("(?i)OPENAI_API_KEY\\s*[=:]\\s*[^\\s\",}]+", "OPENAI_API_KEY=***REDACTED***")
+                .replaceAll("(?i)Bearer\\s+[A-Za-z0-9._\\-]+", "Bearer ***REDACTED***");
+
         if (formatted.length() <= MAX_LOG_BODY_LENGTH) {
             return formatted;
         }
@@ -97,6 +101,3 @@ public class OutboundApiLoggingInterceptor implements ClientHttpRequestIntercept
         return sanitized;
     }
 }
-        formatted = formatted
-                .replaceAll("(?i)OPENAI_API_KEY\\s*[=:]\\s*[^\\s\",}]+", "OPENAI_API_KEY=***REDACTED***")
-                .replaceAll("(?i)Bearer\\s+[A-Za-z0-9._\\-]+", "Bearer ***REDACTED***");
