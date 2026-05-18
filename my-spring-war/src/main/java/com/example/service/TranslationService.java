@@ -91,6 +91,7 @@ public class TranslationService {
     private final String riskyTermsFile;
     private final boolean placeholderProtectionEnabled;
     private final boolean validationEnabled;
+    private final boolean openAiPostProcessingEnabled;
     private final Map<String, String> activeGlossariesByLanguagePair = new ConcurrentHashMap<>();
     private final Map<String, String> activeAdaptiveDatasetsByLanguagePair = new ConcurrentHashMap<>();
     private final Set<String> cancelledTranslationRequests = ConcurrentHashMap.newKeySet();
@@ -140,6 +141,7 @@ public class TranslationService {
             @Value("${myapp.riskyTermsFile:risky-terms.txt}") String riskyTermsFile,
             @Value("${myapp.translation.placeholderProtectionEnabled:true}") boolean placeholderProtectionEnabled,
             @Value("${myapp.translation.validationEnabled:true}") boolean validationEnabled,
+            @Value("${translation.openai-post-processing.enabled:true}") boolean openAiPostProcessingEnabled,
             ObjectMapper mapper,
             RestTemplateBuilder restTemplateBuilder,
             OpenAiTranslationReviewService openAiTranslationReviewService
@@ -168,6 +170,7 @@ public class TranslationService {
         this.riskyTermsFile = riskyTermsFile;
         this.placeholderProtectionEnabled = placeholderProtectionEnabled;
         this.validationEnabled = validationEnabled;
+        this.openAiPostProcessingEnabled = openAiPostProcessingEnabled;
         requireValidBatchSize();
         requireValidRetrySettings();
         validateGlossaryConfiguration();
@@ -319,7 +322,7 @@ public class TranslationService {
     }
 
     public TranslationExportResult translateAndStore(String customPath, String fileName, String targetLanguage, List<TranslationRow> rows) throws Exception {
-        return translateAndStore(customPath, fileName, targetLanguage, rows, "adaptive", null);
+        return translateAndStore(customPath, fileName, targetLanguage, rows, "adaptive", null, null);
     }
 
     public TranslationExportResult translateAndStore(
@@ -328,6 +331,7 @@ public class TranslationService {
             String targetLanguage,
             List<TranslationRow> rows,
             String translationMode,
+            Boolean postProcessWithOpenAi,
             String translationRequestId
     ) throws Exception {
         if (rows == null || rows.isEmpty()) {
@@ -345,6 +349,7 @@ public class TranslationService {
                 sourceLanguage,
                 targetLanguage,
                 translationMode,
+                postProcessWithOpenAi,
                 translationRequestId
         );
         List<String> translatedTexts = pipelineResult.translatedTexts();
@@ -439,6 +444,7 @@ public class TranslationService {
                 rows,
                 sourceLanguage,
                 targetLanguage,
+                null,
                 null,
                 null
         );
@@ -658,6 +664,7 @@ public class TranslationService {
             String sourceLanguage,
             String targetLanguage,
             String translationMode,
+            Boolean postProcessWithOpenAi,
             String translationRequestId
     ) {
         throwIfTranslationCancelled(translationRequestId);
@@ -692,7 +699,10 @@ public class TranslationService {
         List<String> restoredTexts = placeholderProtectionEnabled
                 ? restorePlaceholders(protectedItems, translatedProtectedTexts)
                 : translatedProtectedTexts;
-        List<String> reviewedTexts = applyOpenAiReview(sourceLanguage, targetLanguage, protectedItems, restoredTexts);
+        boolean applyOpenAi = postProcessWithOpenAi != null ? postProcessWithOpenAi : openAiPostProcessingEnabled;
+        List<String> reviewedTexts = applyOpenAi
+                ? applyOpenAiReview(sourceLanguage, targetLanguage, protectedItems, restoredTexts)
+                : restoredTexts;
         ValidationReport validationReport = validationEnabled
                 ? validateResults(
                 protectedItems,

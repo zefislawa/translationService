@@ -84,11 +84,11 @@ public class OutboundApiLoggingInterceptor implements ClientHttpRequestIntercept
             if (original != null) {
                 for (String value : original) {
                     if (value == null || value.isBlank()) {
-                        masked.add("<masked>");
+                        masked.add("***REDACTED***");
                     } else if (value.regionMatches(true, 0, "Bearer ", 0, 7)) {
-                        masked.add("Bearer <masked>");
+                        masked.add("Bearer ***REDACTED***");
                     } else {
-                        masked.add("<masked>");
+                        masked.add("***REDACTED***");
                     }
                 }
             }
@@ -97,3 +97,6 @@ public class OutboundApiLoggingInterceptor implements ClientHttpRequestIntercept
         return sanitized;
     }
 }
+        formatted = formatted
+                .replaceAll("(?i)OPENAI_API_KEY\\s*[=:]\\s*[^\\s\",}]+", "OPENAI_API_KEY=***REDACTED***")
+                .replaceAll("(?i)Bearer\\s+[A-Za-z0-9._\\-]+", "Bearer ***REDACTED***");

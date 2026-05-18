@@ -6,6 +6,8 @@ import com.example.api.dto.TranslationCompareTranslateImportRequest;
 import com.example.api.dto.TranslationExportRequest;
 import com.example.api.dto.TranslationExportResult;
 import com.example.api.dto.TranslationFileLoadRequest;
+import com.example.api.dto.TranslationReviewRequest;
+import com.example.api.dto.TranslationReviewResponse;
 import com.example.api.dto.GlossarySyncRequest;
 import com.example.api.dto.GlossarySyncResponse;
 import com.example.api.dto.AdaptiveDatasetSyncRequest;
@@ -14,6 +16,7 @@ import com.example.api.dto.TranslationSaveRequest;
 import com.example.api.dto.SupportedLanguage;
 import com.example.api.dto.TranslationRow;
 import com.example.service.TranslationService;
+import com.example.service.OpenAiTranslationReviewService;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.web.bind.annotation.*;
 
@@ -30,6 +33,7 @@ import java.util.Map;
 public class TranslationController {
 
     private final TranslationService translationService;
+    private final OpenAiTranslationReviewService openAiTranslationReviewService;
     private final String crmDataDirectory;
     private final String crmGlossaryDirectory;
     private final String crmAdaptiveDatasetDirectory;
@@ -41,6 +45,7 @@ public class TranslationController {
 
     public TranslationController(
             TranslationService translationService,
+            OpenAiTranslationReviewService openAiTranslationReviewService,
             @Value("${myapp.crm.sourceFilesDirectory:data}") String crmDataDirectory,
             @Value("${myapp.crm.glossaryDirectory:data}") String crmGlossaryDirectory,
             @Value("${myapp.crm.adaptiveDatasetDirectory:data}") String crmAdaptiveDatasetDirectory,
@@ -51,6 +56,7 @@ public class TranslationController {
             @Value("${myapp.selfService.translatedJsonDirectory:data}") String selfServiceTranslatedDirectory
     ) {
         this.translationService = translationService;
+        this.openAiTranslationReviewService = openAiTranslationReviewService;
         this.crmDataDirectory = crmDataDirectory;
         this.crmGlossaryDirectory = crmGlossaryDirectory;
         this.crmAdaptiveDatasetDirectory = crmAdaptiveDatasetDirectory;
@@ -115,6 +121,7 @@ public class TranslationController {
                     request.getTargetLanguage(),
                     request.getRows(),
                     request.getMode(),
+                    request.getPostProcessWithOpenAi(),
                     translationRequestId
             );
             copyTranslatedFileToContextDirectory(result.getOutputFile(), request.getContext());
@@ -150,6 +157,16 @@ public class TranslationController {
                 request.getSourceFileName(),
                 request.getTargetFileName(),
                 request.getRows()
+        );
+    }
+
+    @PostMapping("/review")
+    public TranslationReviewResponse reviewTranslations(@RequestBody TranslationReviewRequest request) {
+        return openAiTranslationReviewService.reviewTranslations(
+                request.getSourceLanguage(),
+                request.getTargetLanguage(),
+                request.getContext(),
+                request.getItems()
         );
     }
 

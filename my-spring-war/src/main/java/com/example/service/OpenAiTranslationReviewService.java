@@ -29,6 +29,7 @@ public class OpenAiTranslationReviewService {
     private final String model;
     private final String baseUrl;
     private final int maxBatchSize;
+    private final boolean failOnError;
     private final String reasoningEffort;
     private final String verbosity;
     private final ObjectMapper mapper;
@@ -41,6 +42,7 @@ public class OpenAiTranslationReviewService {
             @Value("${openai.base-url:https://api.openai.com/v1}") String baseUrl,
             @Value("${openai.timeout-seconds:60}") int timeoutSeconds,
             @Value("${openai.max-batch-size:100}") int maxBatchSize,
+            @Value("${openai.fail-on-error:false}") boolean failOnError,
             @Value("${openai.reasoning-effort:low}") String reasoningEffort,
             @Value("${openai.verbosity:low}") String verbosity,
             ObjectMapper mapper,
@@ -51,6 +53,7 @@ public class OpenAiTranslationReviewService {
         this.model = model;
         this.baseUrl = baseUrl;
         this.maxBatchSize = Math.max(1, maxBatchSize);
+        this.failOnError = failOnError;
         this.reasoningEffort = reasoningEffort;
         this.verbosity = verbosity;
         this.mapper = mapper;
@@ -88,9 +91,14 @@ public class OpenAiTranslationReviewService {
             headers.setBearerAuth(apiKey);
             Map<String, Object> body = buildRequest(sourceLanguage, targetLanguage, context, batch);
             ResponseEntity<JsonNode> entity = restTemplate.postForEntity(baseUrl + "/responses", new HttpEntity<>(body, headers), JsonNode.class);
-            return parseResponse(entity.getBody(), batch);
+            List<ReviewedTranslationItem> parsed = parseResponse(entity.getBody(), batch);
+            logUsage(entity.getBody(), batch.size(), parsed);
+            return parsed;
         } catch (Exception ex) {
             log.warn("OpenAI translation review failed, falling back to Google output. reason={}", ex.getMessage());
+            if (failOnError) {
+                throw ex;
+            }
             return toFallbackItems(batch);
         }
     }
@@ -170,20 +178,28 @@ public class OpenAiTranslationReviewService {
             Map<String, TranslationReviewItem> byKey = new LinkedHashMap<>();
             for (TranslationReviewItem item : batch) byKey.put(item.getKey(), item);
             List<ReviewedTranslationItem> out = new ArrayList<>();
-            for (JsonNode node : parsed.path("items")) {
+            JsonNode parsedItems = parsed.path("items");
+            if (!parsedItems.isArray() || parsedItems.size() != batch.size()) {
+                return toValidationFailedFallbackItems(batch);
+            }
+            for (JsonNode node : parsedItems) {
                 String key = node.path("key").asText();
                 TranslationReviewItem original = byKey.get(key);
                 if (original == null) continue;
                 String finalText = node.path("finalText").asText(original.getTranslatedText());
-                if (!placeholdersMatch(original.getSourceText(), finalText)) {
-                    finalText = original.getTranslatedText();
-                }
                 ReviewedTranslationItem reviewed = new ReviewedTranslationItem();
                 reviewed.setKey(key);
-                reviewed.setFinalText(finalText);
-                reviewed.setChanged(!Objects.equals(finalText, original.getTranslatedText()));
+                List<String> issues = new ArrayList<>(toIssues(node.path("issues")));
+                if (!isValidReviewItem(original, finalText, issues)) {
+                    reviewed.setFinalText(original.getTranslatedText());
+                    reviewed.setChanged(false);
+                    issues.add("openai_validation_failed");
+                } else {
+                    reviewed.setFinalText(finalText);
+                    reviewed.setChanged(!Objects.equals(finalText, original.getTranslatedText()));
+                }
                 reviewed.setReason(node.path("reason").asText(""));
-                reviewed.setIssues(toIssues(node.path("issues")));
+                reviewed.setIssues(issues);
                 out.add(reviewed);
                 byKey.remove(key);
             }
@@ -226,6 +242,41 @@ public class OpenAiTranslationReviewService {
         return extract(source).equals(extract(candidate));
     }
 
+    private boolean tagsMatch(String source, String candidate) {
+        return extractTags(source).equals(extractTags(candidate));
+    }
+
+    private List<String> extractTags(String text) {
+        List<String> tags = new ArrayList<>();
+        Matcher matcher = Pattern.compile("<[^>]+>").matcher(text == null ? "" : text);
+        while (matcher.find()) tags.add(matcher.group());
+        return tags;
+    }
+
+    private boolean isLikelyIcuBalanced(String value) {
+        int braces = 0;
+        for (char c : (value == null ? "" : value).toCharArray()) {
+            if (c == '{') braces++;
+            if (c == '}') braces--;
+            if (braces < 0) return false;
+        }
+        return braces == 0;
+    }
+
+    private boolean isValidReviewItem(TranslationReviewItem original, String finalText, List<String> issues) {
+        if (finalText == null) return false;
+        if (finalText.isBlank() && original.getTranslatedText() != null && !original.getTranslatedText().isBlank()) return false;
+        if (!placeholdersMatch(original.getSourceText(), finalText) || !placeholdersMatch(original.getTranslatedText(), finalText)) return false;
+        if (!tagsMatch(original.getSourceText(), finalText) || !tagsMatch(original.getTranslatedText(), finalText)) return false;
+        if (!isLikelyIcuBalanced(finalText)) return false;
+        Integer maxLength = original.getMaxLength();
+        if (maxLength != null && maxLength > 0 && finalText.length() > maxLength) {
+            issues.add("max_length_exceeded");
+            return false;
+        }
+        return true;
+    }
+
     private List<String> extract(String text) {
         List<String> found = new ArrayList<>();
         Matcher matcher = PLACEHOLDER_PATTERN.matcher(text == null ? "" : text);
@@ -253,6 +304,27 @@ public class OpenAiTranslationReviewService {
         fallback.setReason("fallback_to_google");
         fallback.setIssues(List.of());
         return fallback;
+    }
+
+    private List<ReviewedTranslationItem> toValidationFailedFallbackItems(List<TranslationReviewItem> items) {
+        List<ReviewedTranslationItem> fallback = new ArrayList<>();
+        for (TranslationReviewItem item : items) {
+            ReviewedTranslationItem reviewed = fallbackItem(item);
+            reviewed.setIssues(List.of("openai_validation_failed"));
+            fallback.add(reviewed);
+        }
+        return fallback;
+    }
+
+    private void logUsage(JsonNode body, int batchSize, List<ReviewedTranslationItem> reviewedItems) {
+        JsonNode usage = body == null ? null : body.path("usage");
+        long inputTokens = usage == null ? 0 : usage.path("input_tokens").asLong(0);
+        long outputTokens = usage == null ? 0 : usage.path("output_tokens").asLong(0);
+        long totalTokens = usage == null ? 0 : usage.path("total_tokens").asLong(0);
+        long changed = reviewedItems.stream().filter(ReviewedTranslationItem::isChanged).count();
+        long failed = reviewedItems.stream().filter(it -> it.getIssues() != null && it.getIssues().contains("openai_validation_failed")).count();
+        log.info("OpenAI translation review completed: model={}, batchSize={}, changed={}, failed={}, inputTokens={}, outputTokens={}, totalTokens={}",
+                model, batchSize, changed, failed, inputTokens, outputTokens, totalTokens);
     }
 
     private TranslationReviewResponse.Summary summarize(List<ReviewedTranslationItem> items) {
