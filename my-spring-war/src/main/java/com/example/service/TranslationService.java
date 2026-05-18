@@ -407,7 +407,6 @@ public class TranslationService {
             String prefix = String.valueOf(prefixEntry.getKey());
             Object prefixValue = prefixEntry.getValue();
             if (!(prefixValue instanceof Map<?, ?> nestedMap)) {
-                rebuilt.put(prefix, prefixValue);
                 continue;
             }
 
@@ -417,12 +416,14 @@ public class TranslationService {
                 Object value = nestedEntry.getValue();
                 if (value instanceof String) {
                     String fullKey = prefix + "." + key;
-                    rebuiltNested.put(key, translatedByFullKey.getOrDefault(fullKey, (String) value));
-                } else {
-                    rebuiltNested.put(key, value);
+                    if (translatedByFullKey.containsKey(fullKey)) {
+                        rebuiltNested.put(key, translatedByFullKey.get(fullKey));
+                    }
                 }
             }
-            rebuilt.put(prefix, rebuiltNested);
+            if (!rebuiltNested.isEmpty()) {
+                rebuilt.put(prefix, rebuiltNested);
+            }
         }
         return rebuilt;
     }

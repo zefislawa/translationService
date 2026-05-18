@@ -6,6 +6,7 @@ import com.example.api.dto.TranslationReviewResponse;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import org.springframework.boot.web.client.RestTemplateBuilder;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
@@ -15,6 +16,8 @@ import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.web.client.RestTemplate;
 
 import java.lang.reflect.Field;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -34,6 +37,9 @@ import static org.springframework.test.web.client.response.MockRestResponseCreat
 class OpenAiTranslationReviewServiceTest {
 
     private final ObjectMapper mapper = new ObjectMapper();
+
+    @TempDir
+    Path tempDir;
 
     @Test
     void sendsResponsesApiRequestWithConfiguredModelReasoningVerbosityAndSchema() throws Exception {
@@ -152,6 +158,25 @@ class OpenAiTranslationReviewServiceTest {
         server.verify();
     }
 
+    @Test
+    void writesReportWithUsageSentStringsAndReceivedStrings() throws Exception {
+        OpenAiTranslationReviewService service = newService(true, "gpt-5.4", 100, 3, 1);
+        MockRestServiceServer server = bindMockServer(service);
+        server.expect(requestTo("https://api.openai.test/v1/responses"))
+                .andRespond(openAiSuccessResponse());
+
+        service.reviewTranslations("en", "bg", "crm",
+                List.of(item("PayNow", "Pay Now", "ÐŸÐ»Ð°Ñ‚Ð¸ ÑÐµÐ³Ð°")));
+
+        String report = Files.readString(tempDir.resolve("openai-report.csv"));
+        assertThat(report, containsString("input_tokens,output_tokens,total_tokens"));
+        assertThat(report, containsString("\"PayNow\""));
+        assertThat(report, containsString("\"Pay Now\""));
+        assertThat(report, containsString("\"ÐŸÐ»Ð°Ñ‚Ð¸ ÑÐµÐ³Ð°\""));
+        assertThat(report, containsString(",10,5,15,"));
+        server.verify();
+    }
+
     private OpenAiTranslationReviewService newService(boolean enabled, String model, int batchSize, int retries, long backoffMs) {
         return new OpenAiTranslationReviewService(
                 enabled,
@@ -166,6 +191,7 @@ class OpenAiTranslationReviewServiceTest {
                 1,
                 "low",
                 "low",
+                tempDir.resolve("openai-report.csv").toString(),
                 mapper,
                 new RestTemplateBuilder()
         );
