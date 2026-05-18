@@ -8,6 +8,7 @@ public class TranslationExportRequest {
     private String fileName;
     private String targetLanguage;
     private String mode;
+    private Boolean postProcessWithOpenAi;
     private List<TranslationRow> rows;
 
 
@@ -56,5 +57,13 @@ public class TranslationExportRequest {
 
     public void setRows(List<TranslationRow> rows) {
         this.rows = rows;
+    }
+
+    public Boolean getPostProcessWithOpenAi() {
+        return postProcessWithOpenAi;
+    }
+
+    public void setPostProcessWithOpenAi(Boolean postProcessWithOpenAi) {
+        this.postProcessWithOpenAi = postProcessWithOpenAi;
     }
 }
