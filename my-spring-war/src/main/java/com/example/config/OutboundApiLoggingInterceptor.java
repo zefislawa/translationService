@@ -70,7 +70,7 @@ public class OutboundApiLoggingInterceptor implements ClientHttpRequestIntercept
         }
 
         formatted = formatted
-                .replaceAll("(?i)OPENAI_API_KEY\\s*[=:]\\s*[^\\s\",}]+", "OPENAI_API_KEY=***REDACTED***")
+                .replaceAll("(?i)(OPENAI_API_KEY[\"']?\\s*[=:]\\s*[\"']?)[^\\s\",}]+", "$1***REDACTED***")
                 .replaceAll("(?i)Bearer\\s+[A-Za-z0-9._\\-]+", "Bearer ***REDACTED***");
 
         if (formatted.length() <= MAX_LOG_BODY_LENGTH) {

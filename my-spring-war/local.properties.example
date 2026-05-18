@@ -57,6 +57,24 @@ myapp.local.placeholderProtectionEnabled=true
 # Write validation report files and row-level quality checks.
 myapp.local.validationEnabled=true
 
+# Enable the optional OpenAI post-processing pass after Google Translation.
+myapp.local.openaiPostProcessingEnabled=true
+
+# OpenAI Responses API configuration. Keep the key blank here and provide it
+# in local.properties or with the OPENAI_API_KEY environment variable.
+myapp.local.openaiEnabled=true
+myapp.local.openaiApiKey=
+myapp.local.openaiModel=gpt-5.4
+myapp.local.openaiBaseUrl=https://api.openai.com/v1
+myapp.local.openaiTimeoutSeconds=60
+myapp.local.openaiMaxBatchSize=100
+myapp.local.openaiFailOnError=false
+myapp.local.openaiMaxRetries=3
+myapp.local.openaiRetryBackoffMs=1000
+myapp.local.openaiMaxConcurrentRequests=1
+myapp.local.openaiReasoningEffort=low
+myapp.local.openaiVerbosity=low
+
 # ------------------------------------------------------------------------
 # Recently added sync variables (latest branches), grouped at the end
 # for easier local-vs-example comparison.

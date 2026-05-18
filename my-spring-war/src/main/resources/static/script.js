@@ -44,6 +44,7 @@ const elements = {
   syncGlossaryGroup: document.getElementById('syncGlossaryGroup'),
   syncAdaptiveDatasetGroup: document.getElementById('syncAdaptiveDatasetGroup'),
   targetLanguageSelect: document.getElementById('targetLanguage'),
+  openAiPostProcess: document.getElementById('openAiPostProcess'),
   translateBtn: document.getElementById('translateBtn'),
   translationForm: document.getElementById('translationForm'),
   newLabelBtn: document.getElementById('newLabelBtn'),
@@ -765,6 +766,7 @@ async function translateAndStore(targetLanguage, signal, requestId) {
       fileName: selectedFile,
       context: activeContext,
       mode: translationMode,
+      postProcessWithOpenAi: elements.openAiPostProcess ? elements.openAiPostProcess.checked : true,
       targetLanguage,
       rows: payloadRows
     })

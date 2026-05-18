@@ -346,6 +346,16 @@ body {
     accent-color: var(--c-primary);
 }
 
+.checkbox-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 38px;
+    color: #374151;
+    font-size: 14px;
+    white-space: nowrap;
+}
+
 .cell-content { padding: 8px 10px; color: #374151; }
 
 .cell-input-container {

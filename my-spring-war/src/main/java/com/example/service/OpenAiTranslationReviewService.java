@@ -60,10 +60,10 @@ public class OpenAiTranslationReviewService {
         this.enabled = enabled;
         this.apiKey = apiKey == null ? "" : apiKey.trim();
         this.model = model;
-        this.baseUrl = baseUrl;
+        this.baseUrl = stripTrailingSlash(baseUrl);
         this.maxBatchSize = Math.max(1, maxBatchSize);
         this.failOnError = failOnError;
-        this.maxRetries = Math.max(1, maxRetries);
+        this.maxRetries = Math.max(0, maxRetries);
         this.retryBackoffMs = Math.max(1L, retryBackoffMs);
         this.maxConcurrentRequests = Math.max(1, maxConcurrentRequests);
         this.reasoningEffort = reasoningEffort;
@@ -119,22 +119,30 @@ public class OpenAiTranslationReviewService {
     }
 
     private ResponseEntity<JsonNode> executeWithRetry(HttpHeaders headers, Map<String, Object> body, int batchSize) {
-        int attempt = 1;
+        int retriesUsed = 0;
         while (true) {
             try {
                 return restTemplate.postForEntity(baseUrl + "/responses", new HttpEntity<>(body, headers), JsonNode.class);
             } catch (Exception ex) {
                 boolean retryable = isRetryable(ex);
-                if (!retryable || attempt >= maxRetries) {
+                if (!retryable || retriesUsed >= maxRetries) {
                     throw ex;
                 }
-                long backoff = retryBackoffMs * (1L << (attempt - 1));
+                long backoff = retryBackoffMs * (1L << retriesUsed);
                 log.warn("Retrying OpenAI review batch after transient failure attempt={} batchSize={} retryInMs={}",
-                        attempt, batchSize, backoff);
+                        retriesUsed + 1, batchSize, backoff);
                 sleep(backoff);
-                attempt++;
+                retriesUsed++;
             }
         }
+    }
+
+    private String stripTrailingSlash(String value) {
+        String normalized = value == null || value.isBlank() ? "https://api.openai.com/v1" : value.trim();
+        while (normalized.endsWith("/")) {
+            normalized = normalized.substring(0, normalized.length() - 1);
+        }
+        return normalized;
     }
 
     private boolean isRetryable(Exception ex) {
@@ -236,10 +244,14 @@ public class OpenAiTranslationReviewService {
             if (!parsedItems.isArray() || parsedItems.size() != batch.size()) {
                 return toValidationFailedFallbackItems(batch);
             }
+            Map<String, ReviewedTranslationItem> reviewedByKey = new LinkedHashMap<>();
+            Set<String> seenKeys = new HashSet<>();
             for (JsonNode node : parsedItems) {
                 String key = node.path("key").asText();
                 TranslationReviewItem original = byKey.get(key);
-                if (original == null) continue;
+                if (key.isBlank() || original == null || !seenKeys.add(key)) {
+                    return toValidationFailedFallbackItems(batch);
+                }
                 String finalText = node.path("finalText").asText(original.getTranslatedText());
                 ReviewedTranslationItem reviewed = new ReviewedTranslationItem();
                 reviewed.setKey(key);
@@ -254,10 +266,15 @@ public class OpenAiTranslationReviewService {
                 }
                 reviewed.setReason(node.path("reason").asText(""));
                 reviewed.setIssues(issues);
-                out.add(reviewed);
+                reviewedByKey.put(key, reviewed);
                 byKey.remove(key);
             }
-            byKey.values().forEach(item -> out.add(fallbackItem(item)));
+            if (!byKey.isEmpty()) {
+                return toValidationFailedFallbackItems(batch);
+            }
+            for (TranslationReviewItem item : batch) {
+                out.add(reviewedByKey.getOrDefault(item.getKey(), validationFailedFallbackItem(item)));
+            }
             return out;
         } catch (Exception ex) {
             log.warn("OpenAI response parse failed, using fallback. reason={}", ex.getMessage());
@@ -363,11 +380,15 @@ public class OpenAiTranslationReviewService {
     private List<ReviewedTranslationItem> toValidationFailedFallbackItems(List<TranslationReviewItem> items) {
         List<ReviewedTranslationItem> fallback = new ArrayList<>();
         for (TranslationReviewItem item : items) {
-            ReviewedTranslationItem reviewed = fallbackItem(item);
-            reviewed.setIssues(List.of("openai_validation_failed"));
-            fallback.add(reviewed);
+            fallback.add(validationFailedFallbackItem(item));
         }
         return fallback;
+    }
+
+    private ReviewedTranslationItem validationFailedFallbackItem(TranslationReviewItem item) {
+        ReviewedTranslationItem reviewed = fallbackItem(item);
+        reviewed.setIssues(List.of("openai_validation_failed"));
+        return reviewed;
     }
 
     private void logUsage(JsonNode body, int batchSize, List<ReviewedTranslationItem> reviewedItems) {
@@ -377,17 +398,20 @@ public class OpenAiTranslationReviewService {
         long totalTokens = usage == null ? 0 : usage.path("total_tokens").asLong(0);
         long changed = reviewedItems.stream().filter(ReviewedTranslationItem::isChanged).count();
         long failed = reviewedItems.stream().filter(it -> it.getIssues() != null && it.getIssues().contains("openai_validation_failed")).count();
-        log.info("OpenAI translation review completed: model={}, batchSize={}, changed={}, failed={}, inputTokens={}, outputTokens={}, totalTokens={}",
-                model, batchSize, changed, failed, inputTokens, outputTokens, totalTokens);
+        log.info("OpenAI translation review completed: model={}, batchSize={}, changed={}, failed={}, inputTokens={}, outputTokens={}, totalTokens={}, estimatedCost={}",
+                model, batchSize, changed, failed, inputTokens, outputTokens, totalTokens, "unavailable");
     }
 
     private TranslationReviewResponse.Summary summarize(List<ReviewedTranslationItem> items) {
         TranslationReviewResponse.Summary summary = new TranslationReviewResponse.Summary();
         summary.setTotal(items.size());
         int changed = (int) items.stream().filter(ReviewedTranslationItem::isChanged).count();
+        int failed = (int) items.stream()
+                .filter(it -> it.getIssues() != null && it.getIssues().contains("openai_validation_failed"))
+                .count();
         summary.setChanged(changed);
-        summary.setUnchanged(items.size() - changed);
-        summary.setFailed(0);
+        summary.setUnchanged(items.size() - changed - failed);
+        summary.setFailed(failed);
         return summary;
     }
 }
