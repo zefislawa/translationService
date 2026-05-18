@@ -88,6 +88,10 @@ public class TranslationService {
     private final String riskyTermsFile;
     private final boolean placeholderProtectionEnabled;
     private final boolean validationEnabled;
+    private final boolean openaiTranslationReviewEnabled;
+    private final String openaiApiKey;
+    private final String openaiBaseUrl;
+    private final String openaiTranslationReviewModel;
     private final Map<String, String> activeGlossariesByLanguagePair = new ConcurrentHashMap<>();
     private final Map<String, String> activeAdaptiveDatasetsByLanguagePair = new ConcurrentHashMap<>();
     private final Set<String> cancelledTranslationRequests = ConcurrentHashMap.newKeySet();
@@ -137,6 +141,10 @@ public class TranslationService {
             @Value("${myapp.riskyTermsFile:risky-terms.txt}") String riskyTermsFile,
             @Value("${myapp.translation.placeholderProtectionEnabled:true}") boolean placeholderProtectionEnabled,
             @Value("${myapp.translation.validationEnabled:true}") boolean validationEnabled,
+            @Value("${myapp.openai.translationReviewEnabled:false}") boolean openaiTranslationReviewEnabled,
+            @Value("${myapp.openai.apiKey:}") String openaiApiKey,
+            @Value("${myapp.openai.baseUrl:https://api.openai.com/v1}") String openaiBaseUrl,
+            @Value("${myapp.openai.translationReviewModel:gpt-5.4}") String openaiTranslationReviewModel,
             ObjectMapper mapper,
             RestTemplateBuilder restTemplateBuilder
     ) throws Exception {
@@ -164,6 +172,10 @@ public class TranslationService {
         this.riskyTermsFile = riskyTermsFile;
         this.placeholderProtectionEnabled = placeholderProtectionEnabled;
         this.validationEnabled = validationEnabled;
+        this.openaiTranslationReviewEnabled = openaiTranslationReviewEnabled;
+        this.openaiApiKey = openaiApiKey;
+        this.openaiBaseUrl = openaiBaseUrl;
+        this.openaiTranslationReviewModel = openaiTranslationReviewModel;
         requireValidBatchSize();
         requireValidRetrySettings();
         validateGlossaryConfiguration();
@@ -687,17 +699,101 @@ public class TranslationService {
         List<String> restoredTexts = placeholderProtectionEnabled
                 ? restorePlaceholders(protectedItems, translatedProtectedTexts)
                 : translatedProtectedTexts;
+        List<String> reviewedTexts = maybeReviewTranslationsWithOpenAi(
+                protectedItems,
+                restoredTexts,
+                sourceLanguage,
+                targetLanguage,
+                translationRequestId
+        );
         ValidationReport validationReport = validationEnabled
                 ? validateResults(
                 protectedItems,
                 translatedItems,
-                restoredTexts,
+                reviewedTexts,
                 sourceLanguage,
                 targetLanguage,
                 configuredRiskyTerms
         )
-                : createValidationSkippedReport(protectedItems, translatedItems, restoredTexts);
-        return new TranslationPipelineResult(restoredTexts, validationReport);
+                : createValidationSkippedReport(protectedItems, translatedItems, reviewedTexts);
+        return new TranslationPipelineResult(reviewedTexts, validationReport);
+    }
+
+    private List<String> maybeReviewTranslationsWithOpenAi(
+            List<PreparedTranslationItem> items,
+            List<String> translatedTexts,
+            String sourceLanguage,
+            String targetLanguage,
+            String translationRequestId
+    ) {
+        if (!openaiTranslationReviewEnabled || openaiApiKey == null || openaiApiKey.isBlank()) {
+            return translatedTexts;
+        }
+        throwIfTranslationCancelled(translationRequestId);
+        String endpoint = openaiBaseUrl.replaceAll("/+$", "") + "/responses";
+        List<String> reviewed = new ArrayList<>(translatedTexts.size());
+        for (int i = 0; i < translatedTexts.size(); i++) {
+            PreparedTranslationItem item = items.get(i);
+            String candidate = translatedTexts.get(i);
+            if (candidate == null || candidate.isBlank()) {
+                reviewed.add(Objects.requireNonNullElse(candidate, ""));
+                continue;
+            }
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_JSON);
+            headers.setBearerAuth(openaiApiKey.trim());
+            OpenAiTranslationReviewInput input = new OpenAiTranslationReviewInput(
+                    sourceLanguage,
+                    targetLanguage,
+                    item.item().fullKey(),
+                    item.item().sourceText(),
+                    candidate,
+                    item.metadata().placeholders()
+            );
+            try {
+                OpenAiResponsesRequest request = new OpenAiResponsesRequest(
+                        openaiTranslationReviewModel,
+                        false,
+                        """
+                        You are a translation reviewer. Improve the candidate translation for naturalness and consistency without changing meaning.
+                        Keep placeholders/tokens exactly unchanged. Return only the final translation text, no explanations.
+                        """,
+                        mapper.writeValueAsString(input)
+                );
+                ResponseEntity<OpenAiResponsesResponse> response = restTemplate.postForEntity(
+                        endpoint,
+                        new HttpEntity<>(request, headers),
+                        OpenAiResponsesResponse.class
+                );
+                String outputText = extractOpenAiOutputText(response.getBody());
+                reviewed.add(outputText == null || outputText.isBlank() ? candidate : outputText);
+            } catch (Exception ex) {
+                log.warn("OpenAI translation review failed for key={} model={} message={}",
+                        item.item().fullKey(),
+                        openaiTranslationReviewModel,
+                        sanitizeErrorMessage(ex.getMessage()));
+                reviewed.add(candidate);
+            }
+        }
+        return reviewed;
+    }
+
+    private String extractOpenAiOutputText(OpenAiResponsesResponse responseBody) {
+        if (responseBody == null || responseBody.output() == null) {
+            return null;
+        }
+        for (OpenAiOutputItem outputItem : responseBody.output()) {
+            if (outputItem.content() == null) {
+                continue;
+            }
+            for (OpenAiOutputContent content : outputItem.content()) {
+                if (content == null || content.text() == null || content.text().isBlank()) {
+                    continue;
+                }
+                return content.text().trim();
+            }
+        }
+        return responseBody.outputText();
     }
 
     private ValidationReport createValidationSkippedReport(
@@ -2715,4 +2811,38 @@ public class TranslationService {
             String riskReason
     ) {
     }
+
+    private record OpenAiTranslationReviewInput(
+            String sourceLanguage,
+            String targetLanguage,
+            String fullKey,
+            String sourceText,
+            String candidateTranslation,
+            List<String> placeholders
+    ) {}
+
+    private record OpenAiResponsesRequest(
+            String model,
+            boolean store,
+            String instructions,
+            String input
+    ) {}
+
+    @JsonAutoDetect(fieldVisibility = JsonAutoDetect.Visibility.ANY)
+    private record OpenAiResponsesResponse(
+            @JsonAlias("output_text") String outputText,
+            List<OpenAiOutputItem> output
+    ) {}
+
+    @JsonAutoDetect(fieldVisibility = JsonAutoDetect.Visibility.ANY)
+    private record OpenAiOutputItem(
+            String type,
+            List<OpenAiOutputContent> content
+    ) {}
+
+    @JsonAutoDetect(fieldVisibility = JsonAutoDetect.Visibility.ANY)
+    private record OpenAiOutputContent(
+            String type,
+            String text
+    ) {}
 }

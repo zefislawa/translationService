@@ -57,6 +57,13 @@ myapp.local.placeholderProtectionEnabled=true
 # Write validation report files and row-level quality checks.
 myapp.local.validationEnabled=true
 
+# Optional OpenAI GPT review pass that post-processes translated strings.
+# Keeps placeholders and source intent while improving style/consistency.
+myapp.local.openaiTranslationReviewEnabled=false
+myapp.local.openaiApiKey=
+myapp.local.openaiBaseUrl=https://api.openai.com/v1
+myapp.local.openaiTranslationReviewModel=gpt-5.4
+
 # ------------------------------------------------------------------------
 # Recently added sync variables (latest branches), grouped at the end
 # for easier local-vs-example comparison.
