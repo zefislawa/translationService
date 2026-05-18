@@ -5,6 +5,8 @@ import com.example.api.dto.TranslationCompareDifference;
 import com.example.api.dto.TranslationCompareResult;
 import com.example.api.dto.TranslationExportResult;
 import com.example.api.dto.TranslationRow;
+import com.example.api.dto.TranslationReviewItem;
+import com.example.api.dto.TranslationReviewResponse;
 import com.example.api.dto.SupportedLanguage;
 import com.google.auth.oauth2.AccessToken;
 import com.google.auth.oauth2.GoogleCredentials;
@@ -65,6 +67,7 @@ public class TranslationService {
     private final Path defaultDataDir;
     private final ObjectMapper mapper;
     private final RestTemplate restTemplate;
+    private final OpenAiTranslationReviewService openAiTranslationReviewService;
     private final String googleCredentialsPath;
     private final String googleProjectId;
     private final String googleLocation;
@@ -138,7 +141,8 @@ public class TranslationService {
             @Value("${myapp.translation.placeholderProtectionEnabled:true}") boolean placeholderProtectionEnabled,
             @Value("${myapp.translation.validationEnabled:true}") boolean validationEnabled,
             ObjectMapper mapper,
-            RestTemplateBuilder restTemplateBuilder
+            RestTemplateBuilder restTemplateBuilder,
+            OpenAiTranslationReviewService openAiTranslationReviewService
     ) throws Exception {
         this.defaultDataDir = Path.of(defaultDataDir).toAbsolutePath();
         this.googleCredentialsPath = googleCredentialsPath;
@@ -168,6 +172,7 @@ public class TranslationService {
         requireValidRetrySettings();
         validateGlossaryConfiguration();
         this.mapper = mapper;
+        this.openAiTranslationReviewService = openAiTranslationReviewService;
         SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
 
         this.restTemplate = restTemplateBuilder
@@ -687,19 +692,53 @@ public class TranslationService {
         List<String> restoredTexts = placeholderProtectionEnabled
                 ? restorePlaceholders(protectedItems, translatedProtectedTexts)
                 : translatedProtectedTexts;
+        List<String> reviewedTexts = applyOpenAiReview(sourceLanguage, targetLanguage, protectedItems, restoredTexts);
         ValidationReport validationReport = validationEnabled
                 ? validateResults(
                 protectedItems,
                 translatedItems,
-                restoredTexts,
+                reviewedTexts,
                 sourceLanguage,
                 targetLanguage,
                 configuredRiskyTerms
         )
-                : createValidationSkippedReport(protectedItems, translatedItems, restoredTexts);
-        return new TranslationPipelineResult(restoredTexts, validationReport);
+                : createValidationSkippedReport(protectedItems, translatedItems, reviewedTexts);
+        return new TranslationPipelineResult(reviewedTexts, validationReport);
     }
 
+
+    private List<String> applyOpenAiReview(
+            String sourceLanguage,
+            String targetLanguage,
+            List<PreparedTranslationItem> items,
+            List<String> translatedTexts
+    ) {
+        List<TranslationReviewItem> reviewItems = new ArrayList<>(items.size());
+        for (int i = 0; i < items.size(); i++) {
+            PreparedTranslationItem item = items.get(i);
+            TranslationReviewItem reviewItem = new TranslationReviewItem();
+            reviewItem.setKey(item.item().fullKey());
+            reviewItem.setSourceText(item.normalizedText());
+            reviewItem.setTranslatedText(translatedTexts.get(i));
+            reviewItem.setContext(item.metadata().riskReason());
+            reviewItems.add(reviewItem);
+        }
+        TranslationReviewResponse response = openAiTranslationReviewService.reviewTranslations(
+                sourceLanguage,
+                targetLanguage,
+                "CRM and self-service product UI translation",
+                reviewItems
+        );
+        Map<String, String> byKey = new LinkedHashMap<>();
+        if (response.getItems() != null) {
+            response.getItems().forEach(it -> byKey.put(it.getKey(), it.getFinalText()));
+        }
+        List<String> reviewed = new ArrayList<>(items.size());
+        for (PreparedTranslationItem item : items) {
+            reviewed.add(byKey.getOrDefault(item.item().fullKey(), translatedTexts.get(item.item().index())));
+        }
+        return reviewed;
+    }
     private ValidationReport createValidationSkippedReport(
             List<PreparedTranslationItem> items,
             List<TranslatedItemResult> translatedItems,
