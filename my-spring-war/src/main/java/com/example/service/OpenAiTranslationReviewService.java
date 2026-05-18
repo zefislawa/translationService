@@ -17,6 +17,11 @@ import org.springframework.web.client.HttpStatusCodeException;
 import org.springframework.web.client.ResourceAccessException;
 
 import java.time.Duration;
+import java.time.Instant;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
@@ -38,6 +43,7 @@ public class OpenAiTranslationReviewService {
     private final int maxConcurrentRequests;
     private final String reasoningEffort;
     private final String verbosity;
+    private final Path reportFile;
     private final ObjectMapper mapper;
     private final RestTemplate restTemplate;
 
@@ -54,6 +60,7 @@ public class OpenAiTranslationReviewService {
             @Value("${openai.max-concurrent-requests:1}") int maxConcurrentRequests,
             @Value("${openai.reasoning-effort:low}") String reasoningEffort,
             @Value("${openai.verbosity:low}") String verbosity,
+            @Value("${openai.report-path:reports/openai}") String reportPath,
             ObjectMapper mapper,
             RestTemplateBuilder restTemplateBuilder
     ) {
@@ -68,6 +75,7 @@ public class OpenAiTranslationReviewService {
         this.maxConcurrentRequests = Math.max(1, maxConcurrentRequests);
         this.reasoningEffort = reasoningEffort;
         this.verbosity = verbosity;
+        this.reportFile = resolveReportFile(reportPath);
         this.mapper = mapper;
         SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
         this.restTemplate = restTemplateBuilder
@@ -108,6 +116,7 @@ public class OpenAiTranslationReviewService {
             ResponseEntity<JsonNode> entity = executeWithRetry(headers, body, batch.size());
             List<ReviewedTranslationItem> parsed = parseResponse(entity.getBody(), batch);
             logUsage(entity.getBody(), batch.size(), parsed);
+            writeReport(sourceLanguage, targetLanguage, context, batch, entity.getBody(), parsed);
             return parsed;
         } catch (Exception ex) {
             log.warn("OpenAI translation review failed, falling back to Google output. reason={}", ex.getMessage());
@@ -143,6 +152,18 @@ public class OpenAiTranslationReviewService {
             normalized = normalized.substring(0, normalized.length() - 1);
         }
         return normalized;
+    }
+
+    private Path resolveReportFile(String configuredReportPath) {
+        String rawPath = configuredReportPath == null || configuredReportPath.isBlank()
+                ? "reports/openai"
+                : configuredReportPath.trim();
+        Path configuredPath = Path.of(rawPath).toAbsolutePath().normalize();
+        String fileName = configuredPath.getFileName() == null ? "" : configuredPath.getFileName().toString().toLowerCase(Locale.ROOT);
+        if (fileName.endsWith(".csv") || fileName.endsWith(".txt")) {
+            return configuredPath;
+        }
+        return configuredPath.resolve("openai-translation-review-report.csv").normalize();
     }
 
     private boolean isRetryable(Exception ex) {
@@ -407,6 +428,71 @@ public class OpenAiTranslationReviewService {
         long failed = reviewedItems.stream().filter(it -> it.getIssues() != null && it.getIssues().contains("openai_validation_failed")).count();
         log.info("OpenAI translation review completed: model={}, batchSize={}, changed={}, failed={}, inputTokens={}, outputTokens={}, totalTokens={}, estimatedCost={}",
                 model, batchSize, changed, failed, inputTokens, outputTokens, totalTokens, "unavailable");
+    }
+
+    private synchronized void writeReport(
+            String sourceLanguage,
+            String targetLanguage,
+            String context,
+            List<TranslationReviewItem> sentItems,
+            JsonNode body,
+            List<ReviewedTranslationItem> receivedItems
+    ) {
+        try {
+            Path parent = reportFile.getParent();
+            if (parent != null) {
+                Files.createDirectories(parent);
+            }
+            boolean writeHeader = !Files.exists(reportFile) || Files.size(reportFile) == 0;
+            StringBuilder csv = new StringBuilder();
+            if (writeHeader) {
+                csv.append("timestamp,response_id,model,source_language,target_language,context,batch_size,input_tokens,output_tokens,total_tokens,key,sent_source_text,sent_translated_text,received_final_text,received_changed,received_reason,received_issues\n");
+            }
+
+            JsonNode usage = body == null ? null : body.path("usage");
+            long inputTokens = usage == null ? 0 : usage.path("input_tokens").asLong(0);
+            long outputTokens = usage == null ? 0 : usage.path("output_tokens").asLong(0);
+            long totalTokens = usage == null ? 0 : usage.path("total_tokens").asLong(0);
+            String responseId = body == null ? "" : body.path("id").asText("");
+            String timestamp = Instant.now().toString();
+
+            Map<String, ReviewedTranslationItem> receivedByKey = new LinkedHashMap<>();
+            if (receivedItems != null) {
+                for (ReviewedTranslationItem receivedItem : receivedItems) {
+                    receivedByKey.put(receivedItem.getKey(), receivedItem);
+                }
+            }
+
+            for (TranslationReviewItem sentItem : sentItems) {
+                ReviewedTranslationItem receivedItem = receivedByKey.get(sentItem.getKey());
+                csv.append(csvCell(timestamp)).append(',')
+                        .append(csvCell(responseId)).append(',')
+                        .append(csvCell(model)).append(',')
+                        .append(csvCell(normalizeSourceLanguage(sourceLanguage))).append(',')
+                        .append(csvCell(targetLanguage)).append(',')
+                        .append(csvCell(context)).append(',')
+                        .append(sentItems.size()).append(',')
+                        .append(inputTokens).append(',')
+                        .append(outputTokens).append(',')
+                        .append(totalTokens).append(',')
+                        .append(csvCell(sentItem.getKey())).append(',')
+                        .append(csvCell(sentItem.getSourceText())).append(',')
+                        .append(csvCell(sentItem.getTranslatedText())).append(',')
+                        .append(csvCell(receivedItem == null ? "" : receivedItem.getFinalText())).append(',')
+                        .append(csvCell(String.valueOf(receivedItem != null && receivedItem.isChanged()))).append(',')
+                        .append(csvCell(receivedItem == null ? "" : receivedItem.getReason())).append(',')
+                        .append(csvCell(receivedItem == null || receivedItem.getIssues() == null ? "" : String.join(" | ", receivedItem.getIssues())))
+                        .append('\n');
+            }
+            Files.writeString(reportFile, csv.toString(), StandardCharsets.UTF_8, StandardOpenOption.CREATE, StandardOpenOption.APPEND);
+        } catch (Exception ex) {
+            log.warn("Failed to write OpenAI translation review report to {}: {}", reportFile, ex.getMessage());
+        }
+    }
+
+    private String csvCell(String value) {
+        String safeValue = value == null ? "" : value;
+        return "\"" + safeValue.replace("\"", "\"\"") + "\"";
     }
 
     private TranslationReviewResponse.Summary summarize(List<ReviewedTranslationItem> items) {

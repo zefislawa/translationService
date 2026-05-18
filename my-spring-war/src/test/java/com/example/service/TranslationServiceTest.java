@@ -168,6 +168,45 @@ class TranslationServiceTest {
     }
 
     @Test
+    void translateAndStoreWritesOnlySelectedRowsIntoTranslatedJson() throws Exception {
+        TranslationService service = createService("", false, "en", "en", 50);
+
+        Files.writeString(tempDir.resolve("selected_subset.json"), """
+                {
+                  "b" : {
+                    "apply" : "Apply",
+                    "cancel" : "Cancel",
+                    "close" : "Close"
+                  },
+                  "m" : {
+                    "save" : "Save",
+                    "delete" : "Delete"
+                  },
+                  "x" : {
+                    "ignored" : "Ignored"
+                  }
+                }
+                """);
+
+        service.translateAndStore(null, "selected_subset.json", "en", List.of(
+                new TranslationRow("b", "apply", "Apply translated", ""),
+                new TranslationRow("b", "close", "Close translated", ""),
+                new TranslationRow("m", "save", "Save translated", "")
+        ));
+
+        assertEquals("""
+                {
+                  "b" : {
+                    "apply" : "Apply translated",
+                    "close" : "Close translated"
+                  },
+                  "m" : {
+                    "save" : "Save translated"
+                  }
+                }""", normalizeLineEndings(Files.readString(tempDir.resolve("en.json"))));
+    }
+
+    @Test
     void loadRowsPreservesExactPrefixKeyAndSourceText() throws Exception {
         TranslationService service = createService("", false, "en", "bg", 50);
 
@@ -591,7 +630,7 @@ class TranslationServiceTest {
     }
 
     @Test
-    void flattenAndRebuildPreservesOriginalJsonStructure() throws Exception {
+    void flattenAndRebuildPreservesSelectedJsonStructureOnly() throws Exception {
         TranslationService service = createService("", false, "en", "bg", 50);
         ObjectMapper objectMapper = new ObjectMapper();
         Object sourcePayload = objectMapper.readValue("""
@@ -607,8 +646,8 @@ class TranslationServiceTest {
         JsonNode rebuiltNode = objectMapper.valueToTree(rebuilt);
 
         assertEquals("Bonjour", rebuiltNode.path("b").path("title").asText());
-        assertEquals(3, rebuiltNode.path("b").path("count").asInt());
-        assertEquals("keep", rebuiltNode.path("meta").get(0).asText());
+        assertTrue(rebuiltNode.path("b").path("count").isMissingNode());
+        assertTrue(rebuiltNode.path("meta").isMissingNode());
     }
 
     @Test
@@ -1043,6 +1082,7 @@ class TranslationServiceTest {
                 1,
                 "low",
                 "low",
+                tempDir.resolve("openai-report.csv").toString(),
                 new ObjectMapper(),
                 new RestTemplateBuilder()
         );
