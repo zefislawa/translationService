@@ -455,7 +455,7 @@ public class TranslationService {
         }
 
         Path outputFile = resolveJsonFile(customPath, targetFileName);
-        Map<String, Map<String, String>> existingPayload = readSectionMap(outputFile);
+        Map<String, Map<String, String>> selectedPayload = new LinkedHashMap<>();
 
         for (int i = 0; i < rows.size(); i++) {
             TranslationRow row = rows.get(i);
@@ -466,12 +466,12 @@ public class TranslationService {
                 throw new IllegalArgumentException("Each compare row must include a non-empty section and key");
             }
 
-            existingPayload
+            selectedPayload
                     .computeIfAbsent(section, ignored -> new LinkedHashMap<>())
                     .put(key, translatedTexts.get(i));
         }
 
-        mapper.writerWithDefaultPrettyPrinter().writeValue(outputFile.toFile(), existingPayload);
+        mapper.writerWithDefaultPrettyPrinter().writeValue(outputFile.toFile(), selectedPayload);
         writeValidationReport(outputFile, pipelineResult.validationReport());
         return new TranslationExportResult(outputFile.getFileName().toString(), targetLanguage, translatedTexts.size());
     }

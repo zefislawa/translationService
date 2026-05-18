@@ -6,11 +6,13 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpRequest;
+import org.springframework.http.MediaType;
 import org.springframework.http.client.ClientHttpRequestExecution;
 import org.springframework.http.client.ClientHttpRequestInterceptor;
 import org.springframework.http.client.ClientHttpResponse;
 
 import java.io.IOException;
+import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
@@ -32,7 +34,7 @@ public class OutboundApiLoggingInterceptor implements ClientHttpRequestIntercept
                 request.getMethod(),
                 request.getURI(),
                 sanitizeHeaders(request.getHeaders()),
-                prettifyAndTruncateBody(body));
+                prettifyAndTruncateBody(body, request.getHeaders().getContentType()));
 
         ClientHttpResponse response = execution.execute(request, body);
         try {
@@ -43,7 +45,7 @@ public class OutboundApiLoggingInterceptor implements ClientHttpRequestIntercept
                     request.getURI(),
                     response.getStatusCode(),
                     sanitizeHeaders(response.getHeaders()),
-                    prettifyAndTruncateBody(responseBodyBytes));
+                    prettifyAndTruncateBody(responseBodyBytes, response.getHeaders().getContentType()));
 
             return new CachedBodyClientHttpResponse(response, responseBodyBytes);
         } catch (IOException ex) {
@@ -55,12 +57,15 @@ public class OutboundApiLoggingInterceptor implements ClientHttpRequestIntercept
         }
     }
 
-    private String prettifyAndTruncateBody(byte[] body) {
+    private String prettifyAndTruncateBody(byte[] body, MediaType contentType) {
         if (body == null || body.length == 0) {
             return "<empty>";
         }
 
-        String raw = new String(body, StandardCharsets.UTF_8);
+        Charset charset = contentType != null && contentType.getCharset() != null
+                ? contentType.getCharset()
+                : StandardCharsets.UTF_8;
+        String raw = new String(body, charset);
         String formatted = raw;
         try {
             Object json = objectMapper.readTree(raw);

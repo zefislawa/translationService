@@ -111,7 +111,7 @@ class TranslationServiceTest {
     }
 
     @Test
-    void translateAndImportMergesRowsIntoTargetFileWhenLanguagesMatch() throws Exception {
+    void translateAndImportWritesOnlySelectedRowsIntoTargetFileWhenLanguagesMatch() throws Exception {
         TranslationService service = createService("", false, "en", "bg", 50);
 
         Path targetFile = tempDir.resolve("de.json");
@@ -134,8 +134,8 @@ class TranslationServiceTest {
         assertEquals("""
                 {
                   "b" : {
-                    "existing" : "aktualisiert",
-                    "newKey" : "neuer Wert"
+                    "newKey" : "neuer Wert",
+                    "existing" : "aktualisiert"
                   }
                 }""", normalizeLineEndings(actual));
     }
