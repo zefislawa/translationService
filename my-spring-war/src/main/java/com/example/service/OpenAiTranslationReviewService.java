@@ -96,19 +96,45 @@ public class OpenAiTranslationReviewService {
     }
 
     private Map<String, Object> buildRequest(String sourceLanguage, String targetLanguage, String context, List<TranslationReviewItem> batch) {
-        String instruction = "Review translations and improve only if needed. Preserve placeholders and tags exactly. Return strict JSON object with items[] containing key, finalText, changed, reason, issues.";
+        String instruction = "Review translations and improve only when needed. Preserve placeholders and tags exactly. Keep meaning unchanged and tone natural for target language.";
+        TranslationReviewRequest request = new TranslationReviewRequest();
+        request.setSourceLanguage(sourceLanguage);
+        request.setTargetLanguage(targetLanguage);
+        request.setContext(context);
+        request.setItems(batch);
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("model", model);
         payload.put("reasoning", Map.of("effort", reasoningEffort));
         payload.put("text", Map.of("verbosity", verbosity));
+        payload.put("response_format", Map.of(
+                "type", "json_schema",
+                "name", "translation_review_response",
+                "schema", Map.of(
+                        "type", "object",
+                        "additionalProperties", false,
+                        "properties", Map.of(
+                                "items", Map.of(
+                                        "type", "array",
+                                        "items", Map.of(
+                                                "type", "object",
+                                                "additionalProperties", false,
+                                                "properties", Map.of(
+                                                        "key", Map.of("type", "string"),
+                                                        "finalText", Map.of("type", "string"),
+                                                        "changed", Map.of("type", "boolean"),
+                                                        "reason", Map.of("type", "string"),
+                                                        "issues", Map.of("type", "array", "items", Map.of("type", "string"))
+                                                ),
+                                                "required", List.of("key", "finalText", "changed", "reason", "issues")
+                                        )
+                                )
+                        ),
+                        "required", List.of("items")
+                )
+        ));
         payload.put("input", List.of(
                 Map.of("role", "system", "content", List.of(Map.of("type", "input_text", "text", instruction))),
-                Map.of("role", "user", "content", List.of(Map.of("type", "input_text", "text", mapper.valueToTree(Map.of(
-                        "sourceLanguage", sourceLanguage,
-                        "targetLanguage", targetLanguage,
-                        "context", context,
-                        "items", batch
-                )).toString())))
+                Map.of("role", "user", "content", List.of(Map.of("type", "input_text", "text", mapper.valueToTree(request).toString())))
         ));
         payload.put("max_output_tokens", 8000);
         return payload;
@@ -116,8 +142,7 @@ public class OpenAiTranslationReviewService {
 
     private List<ReviewedTranslationItem> parseResponse(JsonNode body, List<TranslationReviewItem> batch) {
         if (body == null) return toFallbackItems(batch);
-        JsonNode textNode = body.path("output_text");
-        String jsonText = textNode.isTextual() ? textNode.asText() : "";
+        String jsonText = extractOutputText(body);
         if (jsonText.isBlank()) return toFallbackItems(batch);
         try {
             JsonNode parsed = mapper.readTree(jsonText);
@@ -144,8 +169,36 @@ public class OpenAiTranslationReviewService {
             byKey.values().forEach(item -> out.add(fallbackItem(item)));
             return out;
         } catch (Exception ex) {
+            log.warn("OpenAI response parse failed, using fallback. reason={}", ex.getMessage());
             return toFallbackItems(batch);
         }
+    }
+
+    private String extractOutputText(JsonNode body) {
+        JsonNode outputTextNode = body.path("output_text");
+        if (outputTextNode.isTextual() && !outputTextNode.asText().isBlank()) {
+            return outputTextNode.asText();
+        }
+        if (outputTextNode.isArray() && !outputTextNode.isEmpty()) {
+            StringBuilder collected = new StringBuilder();
+            for (JsonNode node : outputTextNode) {
+                if (node.isTextual()) {
+                    collected.append(node.asText());
+                }
+            }
+            if (!collected.isEmpty()) {
+                return collected.toString();
+            }
+        }
+        for (JsonNode outputEntry : body.path("output")) {
+            for (JsonNode contentEntry : outputEntry.path("content")) {
+                String text = contentEntry.path("text").asText("");
+                if (!text.isBlank()) {
+                    return text;
+                }
+            }
+        }
+        return "";
     }
 
     private boolean placeholdersMatch(String source, String candidate) {
