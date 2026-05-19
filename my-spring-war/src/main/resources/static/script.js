@@ -45,6 +45,8 @@ const elements = {
   syncAdaptiveDatasetGroup: document.getElementById('syncAdaptiveDatasetGroup'),
   targetLanguageSelect: document.getElementById('targetLanguage'),
   openAiPostProcess: document.getElementById('openAiPostProcess'),
+  estimateOpenAiCostBtn: document.getElementById('estimateOpenAiCostBtn'),
+  openAiCostEstimate: document.getElementById('openAiCostEstimate'),
   translateBtn: document.getElementById('translateBtn'),
   translationForm: document.getElementById('translationForm'),
   newLabelBtn: document.getElementById('newLabelBtn'),
@@ -747,8 +749,7 @@ async function requestTranslationCancellation(requestId) {
 }
 
 async function translateAndStore(targetLanguage, signal, requestId) {
-  const payloadRows = rows
-    .filter((r) => r.selected !== false)
+  const payloadRows = getSelectedRows()
     .map((r) => ({
       section: r.section,
       key: r.column1,
@@ -774,6 +775,98 @@ async function translateAndStore(targetLanguage, signal, requestId) {
 
   if (!res.ok) throw new Error(`Failed to translate text via Google API (HTTP ${res.status})`);
   return res.json();
+}
+
+function getSelectedRows() {
+  return rows.filter((row) => row.selected !== false);
+}
+
+function buildOpenAiCostEstimateRequest(selectedRows, selectedTargetLanguage) {
+  return {
+    sourceLanguage: detectSourceLanguageFromSelectedFile(selectedFile),
+    targetLanguage: selectedTargetLanguage,
+    context: 'CRM and self-service product UI translation',
+    items: selectedRows.map((row) => ({
+      key: `${row.section || ''}.${row.column1 || ''}`,
+      sourceText: row.column2 || '',
+      translatedText: row.column2 || '',
+      context: row.reference || ''
+    }))
+  };
+}
+
+async function estimateOpenAiCost(payload) {
+  const res = await fetch('/api/translations/review/estimate-cost', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+
+  if (!res.ok) {
+    const errorText = await res.text();
+    throw new Error(errorText || `Unable to estimate OpenAI cost (HTTP ${res.status})`);
+  }
+  return res.json();
+}
+
+function formatInteger(value) {
+  return new Intl.NumberFormat().format(Number(value || 0));
+}
+
+function formatEstimatedCost(value) {
+  const numeric = Number(value || 0);
+  return numeric.toLocaleString(undefined, {
+    minimumFractionDigits: 4,
+    maximumFractionDigits: 6
+  });
+}
+
+function renderOpenAiCostEstimate(result) {
+  if (!elements.openAiCostEstimate) return;
+
+  const lines = [
+    `Estimated OpenAI cost: $${formatEstimatedCost(result.estimatedCostUsd)}`,
+    `Model: ${result.model || ''}`,
+    `Selected strings: ${formatInteger(result.selectedStringCount)}`,
+    `Input tokens: ${formatInteger(result.inputTokens)}`,
+    `Estimated output tokens: ${formatInteger(result.outputTokens)}`,
+    `Estimated total tokens: ${formatInteger(result.totalTokens)}`
+  ];
+
+  if (result.thresholdExceeded && result.warningMessage) {
+    lines.push(result.warningMessage);
+  }
+
+  elements.openAiCostEstimate.textContent = lines.join('\n');
+  elements.openAiCostEstimate.classList.toggle('warning', Boolean(result.thresholdExceeded));
+  elements.openAiCostEstimate.classList.remove('hidden');
+}
+
+async function handleEstimateOpenAiCost() {
+  if (elements.fileSelect.value !== selectedFile) {
+    alert('Selected file changed. Click Select to load the chosen file before estimating OpenAI cost.');
+    return;
+  }
+
+  if (!selectedFile) {
+    alert('Please choose and load a file first.');
+    return;
+  }
+
+  const selectedTargetLanguage = elements.targetLanguageSelect.value;
+  if (!selectedTargetLanguage) {
+    alert('Please select a target language.');
+    return;
+  }
+
+  const selectedRows = getSelectedRows();
+  if (selectedRows.length === 0) {
+    alert('Please select at least one label row to estimate OpenAI cost.');
+    return;
+  }
+
+  const result = await estimateOpenAiCost(buildOpenAiCostEstimateRequest(selectedRows, selectedTargetLanguage));
+  renderOpenAiCostEstimate(result);
 }
 
 
@@ -1441,6 +1534,7 @@ document.querySelectorAll('input[name="translationMode"]').forEach((radio) => {
   });
 });
 elements.translateBtn.addEventListener('click', () => handleTranslate().catch((e) => alert(e.message)));
+elements.estimateOpenAiCostBtn.addEventListener('click', () => handleEstimateOpenAiCost().catch((e) => alert(e.message)));
 elements.compareBtn.addEventListener('click', () => handleCompare().catch((e) => alert(e.message)));
 elements.compareStatusFilter.addEventListener('change', () => {
   compareStatusFilter = elements.compareStatusFilter.value;

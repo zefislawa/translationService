@@ -17,6 +17,7 @@ import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.web.client.RestTemplate;
 
 import java.io.ByteArrayOutputStream;
+import java.math.BigDecimal;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.nio.file.Files;
@@ -1083,6 +1084,10 @@ class TranslationServiceTest {
                 "low",
                 "low",
                 tempDir.resolve("openai-report.csv").toString(),
+                BigDecimal.ZERO,
+                BigDecimal.ZERO,
+                BigDecimal.ZERO,
+                BigDecimal.ZERO,
                 new ObjectMapper(),
                 new RestTemplateBuilder()
         );

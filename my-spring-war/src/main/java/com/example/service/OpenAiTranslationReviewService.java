@@ -16,6 +16,8 @@ import org.springframework.web.client.RestTemplate;
 import org.springframework.web.client.HttpStatusCodeException;
 import org.springframework.web.client.ResourceAccessException;
 
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.Duration;
 import java.time.Instant;
 import java.nio.charset.StandardCharsets;
@@ -44,6 +46,10 @@ public class OpenAiTranslationReviewService {
     private final String reasoningEffort;
     private final String verbosity;
     private final Path reportFile;
+    private final BigDecimal inputPricePer1M;
+    private final BigDecimal cachedInputPricePer1M;
+    private final BigDecimal outputPricePer1M;
+    private final BigDecimal maxEstimatedCostUsd;
     private final ObjectMapper mapper;
     private final RestTemplate restTemplate;
 
@@ -61,6 +67,10 @@ public class OpenAiTranslationReviewService {
             @Value("${openai.reasoning-effort:low}") String reasoningEffort,
             @Value("${openai.verbosity:low}") String verbosity,
             @Value("${openai.report-path:reports/openai}") String reportPath,
+            @Value("${openai.inputPricePer1M:0}") BigDecimal inputPricePer1M,
+            @Value("${openai.cachedInputPricePer1M:0}") BigDecimal cachedInputPricePer1M,
+            @Value("${openai.outputPricePer1M:0}") BigDecimal outputPricePer1M,
+            @Value("${openai.maxEstimatedCostUsd:0}") BigDecimal maxEstimatedCostUsd,
             ObjectMapper mapper,
             RestTemplateBuilder restTemplateBuilder
     ) {
@@ -76,6 +86,10 @@ public class OpenAiTranslationReviewService {
         this.reasoningEffort = reasoningEffort;
         this.verbosity = verbosity;
         this.reportFile = resolveReportFile(reportPath);
+        this.inputPricePer1M = positiveOrZero(inputPricePer1M);
+        this.cachedInputPricePer1M = positiveOrZero(cachedInputPricePer1M);
+        this.outputPricePer1M = positiveOrZero(outputPricePer1M);
+        this.maxEstimatedCostUsd = positiveOrZero(maxEstimatedCostUsd);
         this.mapper = mapper;
         SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
         this.restTemplate = restTemplateBuilder
@@ -84,6 +98,38 @@ public class OpenAiTranslationReviewService {
                 .requestFactory(() -> new BufferingClientHttpRequestFactory(requestFactory))
                 .additionalInterceptors(new OutboundApiLoggingInterceptor(mapper))
                 .build();
+    }
+
+    public OpenAiCostEstimateResponse estimateCost(String sourceLanguage, String targetLanguage, String context, List<TranslationReviewItem> items) {
+        List<TranslationReviewItem> selectedItems = items == null ? List.of() : items;
+        long inputTokens = 0;
+        long outputTokens = 0;
+
+        for (int i = 0; i < selectedItems.size(); i += maxBatchSize) {
+            List<TranslationReviewItem> batch = selectedItems.subList(i, Math.min(selectedItems.size(), i + maxBatchSize));
+            inputTokens += estimateTokens(writeJson(buildRequest(sourceLanguage, targetLanguage, context, batch)));
+            outputTokens += estimateTokens(writeJson(buildExpectedOutput(batch)));
+        }
+
+        long cachedInputTokens = 0;
+        BigDecimal estimatedCost = calculateCost(inputTokens, cachedInputTokens, outputTokens);
+        boolean thresholdExceeded = maxEstimatedCostUsd.compareTo(BigDecimal.ZERO) > 0
+                && estimatedCost.compareTo(maxEstimatedCostUsd) > 0;
+
+        OpenAiCostEstimateResponse response = new OpenAiCostEstimateResponse();
+        response.setModel(model);
+        response.setSelectedStringCount(selectedItems.size());
+        response.setInputTokens(inputTokens);
+        response.setCachedInputTokens(cachedInputTokens);
+        response.setOutputTokens(outputTokens);
+        response.setTotalTokens(inputTokens + outputTokens);
+        response.setEstimatedCostUsd(estimatedCost.setScale(6, RoundingMode.HALF_UP).stripTrailingZeros().toPlainString());
+        response.setThresholdExceeded(thresholdExceeded);
+        if (thresholdExceeded) {
+            response.setWarningMessage("Estimated OpenAI cost exceeds the configured threshold of $"
+                    + maxEstimatedCostUsd.stripTrailingZeros().toPlainString() + ".");
+        }
+        return response;
     }
 
     public TranslationReviewResponse reviewTranslations(String sourceLanguage, String targetLanguage, String context, List<TranslationReviewItem> items) {
@@ -175,6 +221,55 @@ public class OpenAiTranslationReviewService {
             return status == 429 || status == 500 || status == 502 || status == 503 || status == 504;
         }
         return false;
+    }
+
+    static long estimateTokens(String value) {
+        int characterCount = value == null ? 0 : value.length();
+        return (long) Math.ceil(characterCount / 4.0);
+    }
+
+    BigDecimal calculateCost(long inputTokens, long cachedInputTokens, long outputTokens) {
+        long normalizedInputTokens = Math.max(0, inputTokens);
+        long normalizedCachedInputTokens = Math.min(Math.max(0, cachedInputTokens), normalizedInputTokens);
+        long uncachedInputTokens = normalizedInputTokens - normalizedCachedInputTokens;
+        long normalizedOutputTokens = Math.max(0, outputTokens);
+        return BigDecimal.valueOf(uncachedInputTokens).multiply(inputPricePer1M)
+                .add(BigDecimal.valueOf(normalizedCachedInputTokens).multiply(cachedInputPricePer1M))
+                .add(BigDecimal.valueOf(normalizedOutputTokens).multiply(outputPricePer1M))
+                .divide(BigDecimal.valueOf(1_000_000), 12, RoundingMode.HALF_UP);
+    }
+
+    private BigDecimal positiveOrZero(BigDecimal value) {
+        return value == null || value.compareTo(BigDecimal.ZERO) < 0 ? BigDecimal.ZERO : value;
+    }
+
+    private String writeJson(Object value) {
+        try {
+            return mapper.writeValueAsString(value);
+        } catch (Exception ex) {
+            throw new IllegalStateException("Unable to serialize OpenAI cost estimate payload", ex);
+        }
+    }
+
+    private Map<String, Object> buildExpectedOutput(List<TranslationReviewItem> batch) {
+        List<Map<String, Object>> expectedItems = new ArrayList<>();
+        for (TranslationReviewItem item : batch) {
+            expectedItems.add(Map.of(
+                    "key", item.getKey() == null ? "" : item.getKey(),
+                    "finalText", expectedFinalText(item),
+                    "changed", false,
+                    "reason", "",
+                    "issues", List.of()
+            ));
+        }
+        return Map.of("items", expectedItems);
+    }
+
+    private String expectedFinalText(TranslationReviewItem item) {
+        if (item.getTranslatedText() != null && !item.getTranslatedText().isBlank()) {
+            return item.getTranslatedText();
+        }
+        return item.getSourceText() == null ? "" : item.getSourceText();
     }
 
     private void sleep(long delayMs) {

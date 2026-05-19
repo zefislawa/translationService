@@ -75,6 +75,13 @@ myapp.local.openaiMaxConcurrentRequests=1
 myapp.local.openaiReasoningEffort=low
 myapp.local.openaiVerbosity=low
 
+# OpenAI estimate pricing, in USD per 1M tokens. These direct openai.*
+# keys are intended for config/local.properties and can be updated as pricing changes.
+openai.inputPricePer1M=0
+openai.cachedInputPricePer1M=0
+openai.outputPricePer1M=0
+openai.maxEstimatedCostUsd=0
+
 # Directory or CSV/TXT file path where OpenAI review reports are written.
 # If this points to a directory, openai-translation-review-report.csv is created inside it.
 myapp.local.openaiReportPath=reports/openai

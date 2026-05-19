@@ -442,6 +442,23 @@ body {
     flex-wrap: wrap;
 }
 
+.cost-estimate {
+    margin-top: 12px;
+    padding: 12px;
+    border: 1px solid var(--c-border);
+    border-radius: var(--c-radius-sm);
+    background-color: #f8fafc;
+    color: #1f2937;
+    font-size: 14px;
+    white-space: pre-line;
+}
+
+.cost-estimate.warning {
+    border-color: #f59e0b;
+    background-color: #fffbeb;
+    color: #92400e;
+}
+
 .compare-controls .form-group {
     min-width: 220px;
 }
