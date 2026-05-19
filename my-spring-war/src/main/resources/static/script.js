@@ -790,7 +790,7 @@ function buildOpenAiCostEstimateRequest(selectedRows, selectedTargetLanguage) {
       key: `${row.section || ''}.${row.column1 || ''}`,
       sourceText: row.column2 || '',
       translatedText: row.column2 || '',
-      context: row.reference || ''
+      context: ''
     }))
   };
 }

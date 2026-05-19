@@ -34,6 +34,14 @@ class LogBodyTextDecoderTest {
     }
 
     @Test
+    void repairsMojibakeInsideJsonLogBodies() {
+        String original = "{\"context\":\"Преглед и конфигуриране\",\"sourceText\":\"View access — merged roles\"}";
+        String mojibake = new String(original.getBytes(StandardCharsets.UTF_8), Charset.forName("IBM850"));
+
+        assertEquals(original, LogBodyTextDecoder.repairLikelyMojibake(mojibake));
+    }
+
+    @Test
     void leavesValidLanguageTextWithEthUntouched() {
         String original = "Hvað er nytt i dag?";
 
