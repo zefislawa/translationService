@@ -38,6 +38,8 @@ import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.ArrayList;
@@ -83,6 +85,7 @@ public class TranslationService {
     private final String googleAdaptiveDatasetObjectPrefix;
     private final String googleAdaptiveDatasetResourceTemplate;
     private final boolean googleAdaptiveDatasetEnabled;
+    private final AdaptiveDatasetRoutingStrategy googleAdaptiveDatasetRoutingStrategy;
     private final int googleBatchSize;
     private final int googleRetryAttempts;
     private final long googleRetryBackoffMs;
@@ -103,6 +106,7 @@ public class TranslationService {
     private static final String PLACEHOLDER_TOKEN_PREFIX = "__PH_";
     private static final String ADAPTIVE_DATASETS_REGISTRY_FILE = "adaptive-datasets.json";
     private static final Pattern PROTECTED_PLACEHOLDER_TOKEN_PATTERN = Pattern.compile("__PH_[A-Z0-9_]+__");
+    private static final DateTimeFormatter GENERATED_FILE_TIMESTAMP = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss");
     private static final Set<String> UI_FOCUSED_PREFIXES = Set.of("b", "m", "l");
     private static final Set<String> DEFAULT_AMBIGUOUS_TERMS = Set.of(
             "close", "clear", "apply", "lead", "charge", "rate", "run", "view", "basket", "shopping cart"
@@ -115,6 +119,11 @@ public class TranslationService {
             "mr", "no", "pl", "pt", "pt-BR", "pt-PT", "pa", "ro", "ru", "sr", "sk", "sl", "es", "sv",
             "ta", "te", "th", "tr", "uk", "vi"
     );
+
+    private enum AdaptiveDatasetRoutingStrategy {
+        RISKY_SHORT,
+        ALL
+    }
 
     public TranslationService(
             @Value("${myapp.dataDir}") String defaultDataDir,
@@ -133,6 +142,7 @@ public class TranslationService {
             @Value("${myapp.google.adaptiveDatasetObjectPrefix:}") String googleAdaptiveDatasetObjectPrefix,
             @Value("${myapp.google.adaptiveDatasetResourceTemplate:}") String googleAdaptiveDatasetResourceTemplate,
             @Value("${myapp.google.adaptiveDatasetEnabled:true}") boolean googleAdaptiveDatasetEnabled,
+            @Value("${myapp.google.adaptiveDatasetRoutingStrategy:risky-short}") String googleAdaptiveDatasetRoutingStrategy,
             @Value("${myapp.google.batchSize:50}") int googleBatchSize,
             @Value("${myapp.google.retryAttempts:3}") int googleRetryAttempts,
             @Value("${myapp.google.retryBackoffMs:500}") long googleRetryBackoffMs,
@@ -162,6 +172,7 @@ public class TranslationService {
         this.googleAdaptiveDatasetObjectPrefix = googleAdaptiveDatasetObjectPrefix;
         this.googleAdaptiveDatasetResourceTemplate = googleAdaptiveDatasetResourceTemplate;
         this.googleAdaptiveDatasetEnabled = googleAdaptiveDatasetEnabled;
+        this.googleAdaptiveDatasetRoutingStrategy = parseAdaptiveDatasetRoutingStrategy(googleAdaptiveDatasetRoutingStrategy);
         this.googleBatchSize = googleBatchSize;
         this.googleRetryAttempts = googleRetryAttempts;
         this.googleRetryBackoffMs = googleRetryBackoffMs;
@@ -186,6 +197,16 @@ public class TranslationService {
                 .build();
         Files.createDirectories(this.defaultDataDir);
         loadPersistedAdaptiveDatasets();
+    }
+
+    private AdaptiveDatasetRoutingStrategy parseAdaptiveDatasetRoutingStrategy(String rawStrategy) {
+        String normalized = rawStrategy == null ? "" : rawStrategy.trim().toLowerCase(Locale.ROOT);
+        return switch (normalized) {
+            case "", "risky-short", "risky_short", "short-risky", "short_risky" -> AdaptiveDatasetRoutingStrategy.RISKY_SHORT;
+            case "all" -> AdaptiveDatasetRoutingStrategy.ALL;
+            default -> throw new IllegalArgumentException("Unsupported myapp.google.adaptiveDatasetRoutingStrategy: "
+                    + rawStrategy + ". Supported values are risky-short and all.");
+        };
     }
 
     public List<String> listJsonFiles(String customPath) throws Exception {
@@ -365,13 +386,32 @@ public class TranslationService {
         }
 
         Path sourceFile = resolveJsonFile(customPath, fileName);
-        Path outputFile = sourceFile.getParent().resolve(targetLanguage + ".json").normalize();
+        Path outputFile = resolveGeneratedJsonFile(sourceFile.getParent(), targetLanguage);
         Object sourcePayload = mapper.readValue(sourceFile.toFile(), Object.class);
         Object translatedPayload = rebuildTranslatedPayload(sourcePayload, translatedByFullKey);
         mapper.writerWithDefaultPrettyPrinter().writeValue(outputFile.toFile(), translatedPayload);
         writeValidationReport(outputFile, pipelineResult.validationReport());
 
         return new TranslationExportResult(outputFile.toAbsolutePath().toString(), targetLanguage, translatedTexts.size());
+    }
+
+    private Path resolveGeneratedJsonFile(Path outputDirectory, String targetLanguage) {
+        Path baseOutputFile = outputDirectory.resolve(targetLanguage + ".json").normalize();
+        if (!Files.exists(baseOutputFile)) {
+            return baseOutputFile;
+        }
+        return resolveTimestampedJsonFile(outputDirectory, targetLanguage);
+    }
+
+    private Path resolveTimestampedJsonFile(Path outputDirectory, String baseName) {
+        String timestamp = LocalDateTime.now().format(GENERATED_FILE_TIMESTAMP);
+        Path candidate = outputDirectory.resolve(baseName + "-" + timestamp + ".json").normalize();
+        int suffix = 2;
+        while (Files.exists(candidate)) {
+            candidate = outputDirectory.resolve(baseName + "-" + timestamp + "-" + suffix + ".json").normalize();
+            suffix++;
+        }
+        return candidate;
     }
 
     public void cancelTranslationRequest(String translationRequestId) {
@@ -910,8 +950,11 @@ public class TranslationService {
             headers.setContentType(MediaType.APPLICATION_JSON);
             headers.setBearerAuth(resolveAccessTokenValue());
 
-            log.info("Sending translation batch start={}, endExclusive={}, batchSize={}, source={}, target={}, model={}, glossaryEnabled={}",
-                    start, end, batchItems.size(), sourceLanguage, targetLanguage, googleTranslationModel, googleGlossaryEnabled);
+            log.info("Sending translation batch start={}, endExclusive={}, batchSize={}, source={}, target={}, route={}, model={}, glossaryEnabled={}",
+                    start, end, batchItems.size(), sourceLanguage, targetLanguage,
+                    useAdaptiveDataset ? "adaptiveMtTranslate" : "translateText",
+                    useAdvancedLlm ? googleTranslationModel : "default-nmt",
+                    googleGlossaryEnabled);
 
             List<String> selectedTranslations = translateContentsWithSplitting(
                     url,
@@ -1040,10 +1083,12 @@ public class TranslationService {
                 ? resolveAdaptiveDatasetForTargetLanguage(googleSourceLanguage, googleTargetLanguage)
                 : null;
         boolean adaptiveAvailable = adaptiveDataset != null && !adaptiveDataset.isBlank();
+        log.info("Adaptive translation mode: model={}, adaptiveDatasetEnabled={}, adaptiveDatasetAvailable={}, adaptiveDatasetRoutingStrategy={}",
+                googleTranslationModel, googleAdaptiveDatasetEnabled, adaptiveAvailable, googleAdaptiveDatasetRoutingStrategy.name().toLowerCase(Locale.ROOT));
         List<PreparedTranslationItem> adaptiveCandidates = new ArrayList<>();
         List<PreparedTranslationItem> llmCandidates = new ArrayList<>();
         for (PreparedTranslationItem item : items) {
-            if (adaptiveAvailable && item.metadata().risky() && item.metadata().shortText()) {
+            if (shouldUseAdaptiveMtTranslate(adaptiveAvailable, item)) {
                 adaptiveCandidates.add(item);
             } else {
                 llmCandidates.add(item);
@@ -1101,6 +1146,16 @@ public class TranslationService {
         return translatedByIndex.values().stream()
                 .sorted(Comparator.comparingInt(TranslatedItemResult::index))
                 .toList();
+    }
+
+    private boolean shouldUseAdaptiveMtTranslate(boolean adaptiveAvailable, PreparedTranslationItem item) {
+        if (!adaptiveAvailable) {
+            return false;
+        }
+        return switch (googleAdaptiveDatasetRoutingStrategy) {
+            case ALL -> true;
+            case RISKY_SHORT -> item.metadata().risky() && item.metadata().shortText();
+        };
     }
 
     private List<TranslatedItemResult> translateByMode(
