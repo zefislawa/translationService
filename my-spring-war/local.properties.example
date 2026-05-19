@@ -77,9 +77,9 @@ myapp.local.openaiVerbosity=low
 
 # OpenAI estimate pricing, in USD per 1M tokens. These direct openai.*
 # keys are intended for config/local.properties and can be updated as pricing changes.
-openai.inputPricePer1M=0
+openai.inputPricePer1M=2.50
 openai.cachedInputPricePer1M=0
-openai.outputPricePer1M=0
+openai.outputPricePer1M=15.00
 openai.maxEstimatedCostUsd=0
 
 # Directory or CSV/TXT file path where OpenAI review reports are written.
