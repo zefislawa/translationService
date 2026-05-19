@@ -25,6 +25,10 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.util.*;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -141,16 +145,53 @@ public class OpenAiTranslationReviewService {
         }
 
         List<ReviewedTranslationItem> reviewed = new ArrayList<>();
-        if (maxConcurrentRequests > 1) {
-            log.info("openai.max-concurrent-requests={} configured; current implementation processes sequentially.", maxConcurrentRequests);
-        }
-        for (int i = 0; i < items.size(); i += maxBatchSize) {
-            List<TranslationReviewItem> batch = items.subList(i, Math.min(items.size(), i + maxBatchSize));
-            reviewed.addAll(reviewBatch(sourceLanguage, targetLanguage, context, batch));
+        List<List<TranslationReviewItem>> batches = batches(items);
+        if (maxConcurrentRequests <= 1 || batches.size() <= 1) {
+            for (List<TranslationReviewItem> batch : batches) {
+                reviewed.addAll(reviewBatch(sourceLanguage, targetLanguage, context, batch));
+            }
+        } else {
+            log.info("Processing OpenAI review with bounded concurrency: batchCount={}, maxConcurrentRequests={}",
+                    batches.size(), maxConcurrentRequests);
+            ExecutorService executor = Executors.newFixedThreadPool(Math.min(maxConcurrentRequests, batches.size()));
+            try {
+                List<Future<List<ReviewedTranslationItem>>> futures = new ArrayList<>(batches.size());
+                for (List<TranslationReviewItem> batch : batches) {
+                    futures.add(executor.submit(() -> reviewBatch(sourceLanguage, targetLanguage, context, batch)));
+                }
+                for (Future<List<ReviewedTranslationItem>> future : futures) {
+                    reviewed.addAll(awaitReviewedBatch(future));
+                }
+            } finally {
+                executor.shutdownNow();
+            }
         }
         response.setItems(reviewed);
         response.setSummary(summarize(reviewed));
         return response;
+    }
+
+    private List<List<TranslationReviewItem>> batches(List<TranslationReviewItem> items) {
+        List<List<TranslationReviewItem>> batches = new ArrayList<>();
+        for (int i = 0; i < items.size(); i += maxBatchSize) {
+            batches.add(items.subList(i, Math.min(items.size(), i + maxBatchSize)));
+        }
+        return batches;
+    }
+
+    private List<ReviewedTranslationItem> awaitReviewedBatch(Future<List<ReviewedTranslationItem>> future) {
+        try {
+            return future.get();
+        } catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("Interrupted while waiting for OpenAI review batch", ex);
+        } catch (ExecutionException ex) {
+            Throwable cause = ex.getCause();
+            if (cause instanceof RuntimeException runtimeException) {
+                throw runtimeException;
+            }
+            throw new IllegalStateException("OpenAI review batch failed", cause);
+        }
     }
 
     private List<ReviewedTranslationItem> reviewBatch(String sourceLanguage, String targetLanguage, String context, List<TranslationReviewItem> batch) {
@@ -253,12 +294,13 @@ public class OpenAiTranslationReviewService {
 
     private Map<String, Object> buildExpectedOutput(List<TranslationReviewItem> batch) {
         List<Map<String, Object>> expectedItems = new ArrayList<>();
-        for (TranslationReviewItem item : batch) {
+        int expectedChangedItems = Math.max(1, (int) Math.ceil(batch.size() * 0.1));
+        for (TranslationReviewItem item : batch.subList(0, Math.min(batch.size(), expectedChangedItems))) {
             expectedItems.add(Map.of(
                     "key", item.getKey() == null ? "" : item.getKey(),
                     "finalText", expectedFinalText(item),
-                    "changed", false,
-                    "reason", "",
+                    "changed", true,
+                    "reason", "Estimated changed/problem item.",
                     "issues", List.of()
             ));
         }
@@ -297,7 +339,8 @@ public class OpenAiTranslationReviewService {
                 - Preserve ICU/plural/message syntax exactly.
                 - Do not translate product names, technical identifiers, resource keys, or code-like values.
                 - Do not invent extra meaning.
-                - If the translation is already good, return it unchanged.
+                - If the translation is already good, omit that item from the response.
+                - Return only items that need a changed finalText or have issues to report.
                 - Return only JSON matching the schema.
                 """;
         TranslationReviewRequest request = new TranslationReviewRequest();
@@ -343,7 +386,7 @@ public class OpenAiTranslationReviewService {
                 Map.of("role", "system", "content", List.of(Map.of("type", "input_text", "text", instruction))),
                 Map.of("role", "user", "content", List.of(Map.of("type", "input_text", "text", mapper.valueToTree(request).toString())))
         ));
-        payload.put("max_output_tokens", 8000);
+        payload.put("max_output_tokens", 4000);
         return payload;
     }
 
@@ -364,7 +407,7 @@ public class OpenAiTranslationReviewService {
             for (TranslationReviewItem item : batch) byKey.put(item.getKey(), item);
             List<ReviewedTranslationItem> out = new ArrayList<>();
             JsonNode parsedItems = parsed.path("items");
-            if (!parsedItems.isArray() || parsedItems.size() != batch.size()) {
+            if (!parsedItems.isArray()) {
                 return toValidationFailedFallbackItems(batch);
             }
             Map<String, ReviewedTranslationItem> reviewedByKey = new LinkedHashMap<>();
@@ -392,11 +435,8 @@ public class OpenAiTranslationReviewService {
                 reviewedByKey.put(key, reviewed);
                 byKey.remove(key);
             }
-            if (!byKey.isEmpty()) {
-                return toValidationFailedFallbackItems(batch);
-            }
             for (TranslationReviewItem item : batch) {
-                out.add(reviewedByKey.getOrDefault(item.getKey(), validationFailedFallbackItem(item)));
+                out.add(reviewedByKey.getOrDefault(item.getKey(), fallbackItem(item)));
             }
             return out;
         } catch (Exception ex) {

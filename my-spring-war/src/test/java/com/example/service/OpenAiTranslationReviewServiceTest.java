@@ -59,6 +59,7 @@ class OpenAiTranslationReviewServiceTest {
                     assertThat(body, containsString("\"name\":\"translation_review_result\""));
                     assertThat(body, containsString("\"additionalProperties\":false"));
                     assertThat(body, containsString("\"required\":[\"key\",\"finalText\",\"changed\",\"reason\",\"issues\"]"));
+                    assertThat(body, containsString("omit that item from the response"));
                 })
                 .andRespond(openAiSuccessResponse());
 
@@ -175,6 +176,35 @@ class OpenAiTranslationReviewServiceTest {
         assertThat(report, containsString("\"Pay Now\""));
         assertThat(report, containsString("\"ÐŸÐ»Ð°Ñ‚Ð¸ ÑÐµÐ³Ð°\""));
         assertThat(report, containsString(",10,5,15,"));
+        server.verify();
+    }
+
+    @Test
+    void treatsOmittedItemsAsUnchangedToReduceOutputTokens() throws Exception {
+        OpenAiTranslationReviewService service = newService(true, "gpt-5.4", 100, 3, 1);
+        MockRestServiceServer server = bindMockServer(service);
+        String output = mapper.writeValueAsString(Map.of("items", List.of(Map.of(
+                "key", "NeedsChange",
+                "finalText", "Подобрено",
+                "changed", true,
+                "reason", "Improved wording.",
+                "issues", List.of()
+        ))));
+        server.expect(requestTo("https://api.openai.test/v1/responses"))
+                .andRespond(withSuccess(mapper.writeValueAsString(Map.of("output_text", output)), MediaType.APPLICATION_JSON));
+
+        TranslationReviewResponse response = service.reviewTranslations("en", "bg", "crm", List.of(
+                item("AlreadyGood", "Cancel", "Отказ"),
+                item("NeedsChange", "Submit", "Събмит")
+        ));
+
+        assertEquals(2, response.getItems().size());
+        assertEquals("Отказ", response.getItems().get(0).getFinalText());
+        assertFalse(response.getItems().get(0).isChanged());
+        assertEquals("Подобрено", response.getItems().get(1).getFinalText());
+        assertTrue(response.getItems().get(1).isChanged());
+        assertEquals(1, response.getSummary().getChanged());
+        assertEquals(1, response.getSummary().getUnchanged());
         server.verify();
     }
 

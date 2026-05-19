@@ -23,6 +23,10 @@ public class AppConfigController {
     private final String selfServiceGlossaryDirectory;
     private final String selfServiceAdaptiveDatasetDirectory;
     private final String selfServiceTranslatedDirectory;
+    private final String googleModel;
+    private final String googleAdaptiveDatasetRoutingStrategy;
+    private final boolean googleGlossaryEnabled;
+    private final boolean googleAdaptiveDatasetEnabled;
 
     public AppConfigController(
             @Value("${myapp.ui.preferredTargetLanguage:}") String preferredTargetLanguage,
@@ -36,7 +40,11 @@ public class AppConfigController {
             @Value("${myapp.selfService.sourceFilesDirectory:data}") String selfServiceDataDirectory,
             @Value("${myapp.selfService.glossaryDirectory:data}") String selfServiceGlossaryDirectory,
             @Value("${myapp.selfService.adaptiveDatasetDirectory:data}") String selfServiceAdaptiveDatasetDirectory,
-            @Value("${myapp.selfService.translatedJsonDirectory:data}") String selfServiceTranslatedDirectory
+            @Value("${myapp.selfService.translatedJsonDirectory:data}") String selfServiceTranslatedDirectory,
+            @Value("${myapp.google.model:general/translation-llm}") String googleModel,
+            @Value("${myapp.google.adaptiveDatasetRoutingStrategy:risky-short}") String googleAdaptiveDatasetRoutingStrategy,
+            @Value("${myapp.google.glossaryEnabled:false}") boolean googleGlossaryEnabled,
+            @Value("${myapp.google.adaptiveDatasetEnabled:true}") boolean googleAdaptiveDatasetEnabled
     ) {
         this.preferredTargetLanguage = sanitizeLanguageCode(preferredTargetLanguage);
         this.configuredTargetLanguage = sanitizeLanguageCode(configuredTargetLanguage);
@@ -50,6 +58,10 @@ public class AppConfigController {
         this.selfServiceGlossaryDirectory = selfServiceGlossaryDirectory;
         this.selfServiceAdaptiveDatasetDirectory = selfServiceAdaptiveDatasetDirectory;
         this.selfServiceTranslatedDirectory = selfServiceTranslatedDirectory;
+        this.googleModel = googleModel;
+        this.googleAdaptiveDatasetRoutingStrategy = googleAdaptiveDatasetRoutingStrategy;
+        this.googleGlossaryEnabled = googleGlossaryEnabled;
+        this.googleAdaptiveDatasetEnabled = googleAdaptiveDatasetEnabled;
     }
 
     private String normalizeLanguageCode(String rawLanguageCode) {
@@ -72,7 +84,7 @@ public class AppConfigController {
     }
 
     @GetMapping
-    public Map<String, String> getConfig() {
+    public Map<String, Object> getConfig() {
         return Map.ofEntries(
                 Map.entry("preferredTargetLanguage", preferredTargetLanguage),
                 Map.entry("configuredTargetLanguage", configuredTargetLanguage),
@@ -85,7 +97,11 @@ public class AppConfigController {
                 Map.entry("selfServiceDataDirectory", selfServiceDataDirectory),
                 Map.entry("selfServiceGlossaryDirectory", selfServiceGlossaryDirectory),
                 Map.entry("selfServiceAdaptiveDatasetDirectory", selfServiceAdaptiveDatasetDirectory),
-                Map.entry("selfServiceTranslatedDirectory", selfServiceTranslatedDirectory)
+                Map.entry("selfServiceTranslatedDirectory", selfServiceTranslatedDirectory),
+                Map.entry("googleModel", googleModel),
+                Map.entry("googleAdaptiveDatasetRoutingStrategy", googleAdaptiveDatasetRoutingStrategy),
+                Map.entry("googleGlossaryEnabled", googleGlossaryEnabled),
+                Map.entry("googleAdaptiveDatasetEnabled", googleAdaptiveDatasetEnabled)
         );
     }
 }

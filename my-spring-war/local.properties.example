@@ -67,11 +67,11 @@ myapp.local.openaiApiKey=
 myapp.local.openaiModel=gpt-5.4
 myapp.local.openaiBaseUrl=https://api.openai.com/v1
 myapp.local.openaiTimeoutSeconds=60
-myapp.local.openaiMaxBatchSize=100
+myapp.local.openaiMaxBatchSize=200
 myapp.local.openaiFailOnError=false
 myapp.local.openaiMaxRetries=3
 myapp.local.openaiRetryBackoffMs=1000
-myapp.local.openaiMaxConcurrentRequests=1
+myapp.local.openaiMaxConcurrentRequests=4
 myapp.local.openaiReasoningEffort=low
 myapp.local.openaiVerbosity=low
 
@@ -120,6 +120,12 @@ myapp.local.googleAdaptiveDatasetResourceTemplate=app-adaptive-{source}-{target}
 # Enable adaptive dataset usage during translation.
 # Set to false to translate using glossary/LLM path only.
 myapp.local.googleAdaptiveDatasetEnabled=true
+
+# Controls which adaptive-mode strings use adaptiveMtTranslate when a dataset
+# is active for the source/target pair. Values:
+#   risky-short = only short risky UI strings use adaptiveMtTranslate; others use googleModel
+#   all = all adaptive-mode strings use adaptiveMtTranslate
+myapp.local.googleAdaptiveDatasetRoutingStrategy=risky-short
 
 # CRM specific directories
 myapp.local.crmSourceFilesDirectory=data/crm/source

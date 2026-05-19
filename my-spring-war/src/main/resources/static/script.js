@@ -20,6 +20,10 @@ let translationProgressState = null;
 let activeTranslationAbortController = null;
 let activeTranslationRequestId = null;
 let translationMode = "standard";
+let googleGlossaryEnabled = false;
+let googleAdaptiveDatasetEnabled = true;
+let googleModel = 'general/translation-llm';
+let googleAdaptiveDatasetRoutingStrategy = 'risky-short';
 const selectedFileByContext = { crm: '', selfService: '' };
 
 const elements = {
@@ -108,15 +112,29 @@ function getSelectedTranslationMode() {
 
 function updateAdaptiveControlsVisibility() {
   const shouldShowAdaptiveControls = translationMode === 'adaptive';
-  [
-    elements.glossaryFileGroup,
-    elements.adaptiveDatasetFileGroup,
-    elements.syncGlossaryGroup,
-    elements.syncAdaptiveDatasetGroup
-  ].forEach((group) => {
-    if (!group) return;
-    group.classList.toggle('hidden', !shouldShowAdaptiveControls);
-  });
+  if (elements.glossaryFileGroup) {
+    elements.glossaryFileGroup.classList.toggle('hidden', !shouldShowAdaptiveControls || !googleGlossaryEnabled);
+  }
+  if (elements.syncGlossaryGroup) {
+    elements.syncGlossaryGroup.classList.toggle('hidden', !shouldShowAdaptiveControls || !googleGlossaryEnabled);
+  }
+  if (elements.adaptiveDatasetFileGroup) {
+    elements.adaptiveDatasetFileGroup.classList.toggle('hidden', !shouldShowAdaptiveControls || !googleAdaptiveDatasetEnabled);
+  }
+  if (elements.syncAdaptiveDatasetGroup) {
+    elements.syncAdaptiveDatasetGroup.classList.toggle('hidden', !shouldShowAdaptiveControls || !googleAdaptiveDatasetEnabled);
+  }
+}
+
+function updateTranslationModeHints() {
+  const standardMode = document.querySelector('input[name="translationMode"][value="standard"]');
+  const adaptiveMode = document.querySelector('input[name="translationMode"][value="adaptive"]');
+  if (standardMode && standardMode.parentElement) {
+    standardMode.parentElement.title = 'Uses Google translateText with the default NMT model.';
+  }
+  if (adaptiveMode && adaptiveMode.parentElement) {
+    adaptiveMode.parentElement.title = `Uses ${googleModel}; adaptiveMtTranslate routing: ${googleAdaptiveDatasetRoutingStrategy}.`;
+  }
 }
 
 async function fetchSupportedLanguages() {
@@ -1174,28 +1192,46 @@ async function handleLoadFiles() {
     preferredTargetLanguage = (uiConfig.preferredTargetLanguage || '').trim();
     configuredTargetLanguage = (uiConfig.configuredTargetLanguage || '').trim();
     preferredDisplayLanguage = (uiConfig.displayLanguageCode || uiConfig.referenceLanguageFile || '').trim();
+    googleGlossaryEnabled = uiConfig.googleGlossaryEnabled === true;
+    googleAdaptiveDatasetEnabled = uiConfig.googleAdaptiveDatasetEnabled !== false;
+    googleModel = uiConfig.googleModel || googleModel;
+    googleAdaptiveDatasetRoutingStrategy = uiConfig.googleAdaptiveDatasetRoutingStrategy || googleAdaptiveDatasetRoutingStrategy;
   } catch (error) {
     preferredTargetLanguage = '';
     configuredTargetLanguage = '';
     preferredDisplayLanguage = '';
+    googleGlossaryEnabled = false;
+    googleAdaptiveDatasetEnabled = true;
+    googleModel = 'general/translation-llm';
+    googleAdaptiveDatasetRoutingStrategy = 'risky-short';
     console.warn(error);
   }
+  updateAdaptiveControlsVisibility();
+  updateTranslationModeHints();
 
   const data = await fetchFiles();
   const files = data.files || [];
   availableFiles = files;
-  try {
-    const glossaryFileData = await fetchGlossaryFiles();
-    renderGlossaryFiles(glossaryFileData.files || []);
-  } catch (error) {
-    console.warn(error);
+  if (googleGlossaryEnabled) {
+    try {
+      const glossaryFileData = await fetchGlossaryFiles();
+      renderGlossaryFiles(glossaryFileData.files || []);
+    } catch (error) {
+      console.warn(error);
+      renderGlossaryFiles([]);
+    }
+  } else {
     renderGlossaryFiles([]);
   }
-  try {
-    const adaptiveDatasetFileData = await fetchAdaptiveDatasetFiles();
-    renderAdaptiveDatasetFiles(adaptiveDatasetFileData.files || [], adaptiveDatasetFileData.configuredFile || '');
-  } catch (error) {
-    console.warn(error);
+  if (googleAdaptiveDatasetEnabled) {
+    try {
+      const adaptiveDatasetFileData = await fetchAdaptiveDatasetFiles();
+      renderAdaptiveDatasetFiles(adaptiveDatasetFileData.files || [], adaptiveDatasetFileData.configuredFile || '');
+    } catch (error) {
+      console.warn(error);
+      renderAdaptiveDatasetFiles([], '');
+    }
+  } else {
     renderAdaptiveDatasetFiles([], '');
   }
 
@@ -1237,7 +1273,7 @@ async function handleLoadFiles() {
   try {
     const supportedLanguages = await fetchSupportedLanguages();
     renderSupportedLanguages(supportedLanguages);
-    const languageType = translationMode === 'adaptive' ? 'Adaptive LLM supported languages' : 'Google supported languages';
+    const languageType = translationMode === 'adaptive' ? 'LLM/adaptive supported languages' : 'Google supported languages';
     showSuccessMessage(`Loaded ${files.length} files and ${supportedLanguages.length} ${languageType}.`);
   } catch (error) {
     console.warn(error);
@@ -1346,6 +1382,9 @@ async function handleTranslate() {
 }
 
 async function handleSyncGlossary() {
+  if (!googleGlossaryEnabled) {
+    return;
+  }
   const glossaryFilePath = elements.glossaryFileSelect.value;
   if (!glossaryFilePath) {
     alert('Please select a glossary file.');
@@ -1379,6 +1418,9 @@ async function handleSyncGlossary() {
 }
 
 async function handleSyncAdaptiveDataset() {
+  if (!googleAdaptiveDatasetEnabled) {
+    return;
+  }
   const tsvFilePath = elements.adaptiveDatasetFileSelect.value;
   if (!tsvFilePath) {
     alert('Please select an adaptive dataset TSV file.');

@@ -273,6 +273,7 @@ class TranslationServiceTest {
                 "",
                 "",
                 true,
+                "risky-short",
                 50,
                 3,
                 10,
@@ -356,6 +357,46 @@ class TranslationServiceTest {
     }
 
     @Test
+    void translateAndStoreAddsTimestampWhenTargetFileAlreadyExists() throws Exception {
+        TranslationService service = createService("", false, "en", "bg", 50);
+        seedGoogleAccessToken(service);
+        Files.writeString(tempDir.resolve("en.json"), """
+                {
+                  "b" : {
+                    "apply" : "Apply"
+                  }
+                }
+                """);
+        Files.writeString(tempDir.resolve("bg.json"), """
+                {
+                  "b" : {
+                    "existing" : "Existing"
+                  }
+                }
+                """);
+
+        MockRestServiceServer server = bindMockServer(service);
+        server.expect(requestTo("https://translation.googleapis.com/v3/projects/dummy-project-id/locations/global:translateText"))
+                .andExpect(method(HttpMethod.POST))
+                .andRespond(withSuccess("""
+                        {
+                          "translations":[{"translatedText":"Translated Apply"}]
+                        }
+                        """, MediaType.APPLICATION_JSON));
+
+        TranslationExportResult result = service.translateAndStore(null, "en.json", "bg", List.of(
+                new TranslationRow("b", "apply", "Apply", "")
+        ), "standard", false, null);
+
+        Path outputFile = Path.of(result.getOutputFile());
+        assertTrue(outputFile.getFileName().toString().matches("bg-\\d{8}-\\d{6}(?:-\\d+)?\\.json"));
+        assertTrue(Files.exists(tempDir.resolve("bg.json")));
+        assertTrue(Files.exists(outputFile));
+        assertEquals("Existing", new ObjectMapper().readTree(Files.readString(tempDir.resolve("bg.json"))).path("b").path("existing").asText());
+        server.verify();
+    }
+
+    @Test
     void translateAndStoreWritesPreprocessingMetadataIncludingConfiguredRiskyTerms() throws Exception {
         Path riskyTermsFile = tempDir.resolve("risky-terms.txt");
         Files.writeString(riskyTermsFile, """
@@ -384,9 +425,11 @@ class TranslationServiceTest {
                 }
                 """);
 
-        service.translateAndStore(null, "en.json", "en", rows);
+        TranslationExportResult result = service.translateAndStore(null, "en.json", "en", rows);
 
-        Path reportFile = tempDir.resolve("en.validation-report.json");
+        Path reportFile = Path.of(result.getOutputFile()).resolveSibling(
+                Path.of(result.getOutputFile()).getFileName().toString().replaceFirst("(?i)\\.json$", ".validation-report.json")
+        );
         JsonNode report = new ObjectMapper().readTree(Files.readString(reportFile));
         JsonNode preprocessing = report.path("preprocessing");
         JsonNode rowsNode = report.path("rows");
@@ -537,6 +580,7 @@ class TranslationServiceTest {
                 "",
                 "",
                 true,
+                "risky-short",
                 50,
                 3,
                 10,
@@ -820,6 +864,53 @@ class TranslationServiceTest {
     }
 
     @Test
+    @SuppressWarnings("unchecked")
+    void translateAndStoreRoutesAllStringsToAdaptiveWhenStrategyIsAll() throws Exception {
+        TranslationService service = createService("", false, "en", "fr", 50, "all");
+        Field activeAdaptiveDatasetsField = TranslationService.class.getDeclaredField("activeAdaptiveDatasetsByLanguagePair");
+        activeAdaptiveDatasetsField.setAccessible(true);
+        Map<String, String> activeAdaptiveDatasets = (Map<String, String>) activeAdaptiveDatasetsField.get(service);
+        activeAdaptiveDatasets.put("en->fr", "projects/dummy-project-id/locations/global/adaptiveMtDatasets/en-fr-app");
+        seedGoogleAccessToken(service);
+        Files.writeString(tempDir.resolve("en.json"), """
+                {
+                  "b" : {
+                    "apply" : "Apply"
+                  },
+                  "x" : {
+                    "longText" : "This is a long neutral sentence"
+                  }
+                }
+                """);
+
+        MockRestServiceServer server = bindMockServer(service);
+        String adaptiveUrl = "https://translation.googleapis.com/v3/projects/dummy-project-id/locations/global:adaptiveMtTranslate";
+        server.expect(requestTo(adaptiveUrl))
+                .andExpect(method(HttpMethod.POST))
+                .andExpect(request -> {
+                    ByteArrayOutputStream requestBody = (ByteArrayOutputStream) request.getBody();
+                    JsonNode body = new ObjectMapper().readTree(requestBody.toString(StandardCharsets.UTF_8));
+                    assertEquals(2, body.path("content").size());
+                    assertEquals("Apply", body.path("content").get(0).asText());
+                    assertEquals("This is a long neutral sentence", body.path("content").get(1).asText());
+                })
+                .andRespond(withSuccess("""
+                        {
+                          "translations":[
+                            {"translatedText":"Appliquer"},
+                            {"translatedText":"Ceci est une longue phrase neutre"}
+                          ]
+                        }
+                        """, MediaType.APPLICATION_JSON));
+
+        service.translateAndStore(null, "en.json", "fr", List.of(
+                new TranslationRow("b", "apply", "Apply", ""),
+                new TranslationRow("x", "longText", "This is a long neutral sentence", "")
+        ));
+        server.verify();
+    }
+
+    @Test
     void integrationSmallSampleGeneratesJsonAndCsvReports() throws Exception {
         TranslationService service = createService("", false, "en", "en", 50);
         Files.writeString(tempDir.resolve("en.json"), """
@@ -827,10 +918,14 @@ class TranslationServiceTest {
                   "b": {"hello": "Hello"}
                 }
                 """);
-        service.translateAndStore(null, "en.json", "en", List.of(new TranslationRow("b", "hello", "Hello", "")));
-        assertTrue(Files.exists(tempDir.resolve("en.validation-report.json")));
-        assertTrue(Files.exists(tempDir.resolve("en.validation-report.csv")));
-        String csv = Files.readString(tempDir.resolve("en.validation-report.csv"));
+        TranslationExportResult result = service.translateAndStore(null, "en.json", "en", List.of(new TranslationRow("b", "hello", "Hello", "")));
+        Path outputFile = Path.of(result.getOutputFile());
+        String reportBaseName = outputFile.getFileName().toString().replaceFirst("(?i)\\.json$", "");
+        Path jsonReport = outputFile.resolveSibling(reportBaseName + ".validation-report.json");
+        Path csvReport = outputFile.resolveSibling(reportBaseName + ".validation-report.csv");
+        assertTrue(Files.exists(jsonReport));
+        assertTrue(Files.exists(csvReport));
+        String csv = Files.readString(csvReport);
         assertTrue(csv.contains("full_key,prefix"));
         assertTrue(csv.contains("summary_metric,value"));
     }
@@ -844,11 +939,15 @@ class TranslationServiceTest {
                   "x": {"longText": "This is a long neutral sentence"}
                 }
                 """);
-        service.translateAndStore(null, "en.json", "en", List.of(
+        TranslationExportResult result = service.translateAndStore(null, "en.json", "en", List.of(
                 new TranslationRow("b", "apply", "Apply", ""),
                 new TranslationRow("x", "longText", "This is a long neutral sentence", "")
         ));
-        JsonNode report = new ObjectMapper().readTree(Files.readString(tempDir.resolve("en.validation-report.json")));
+        Path outputFile = Path.of(result.getOutputFile());
+        Path reportFile = outputFile.resolveSibling(
+                outputFile.getFileName().toString().replaceFirst("(?i)\\.json$", ".validation-report.json")
+        );
+        JsonNode report = new ObjectMapper().readTree(Files.readString(reportFile));
         assertTrue(report.path("rows").get(0).path("riskyFlag").asBoolean());
     }
 
@@ -971,6 +1070,17 @@ class TranslationServiceTest {
             String targetLanguage,
             int batchSize
     ) throws Exception {
+        return createService(riskyTermsFile, glossaryEnabled, sourceLanguage, targetLanguage, batchSize, "risky-short");
+    }
+
+    private TranslationService createService(
+            String riskyTermsFile,
+            boolean glossaryEnabled,
+            String sourceLanguage,
+            String targetLanguage,
+            int batchSize,
+            String adaptiveDatasetRoutingStrategy
+    ) throws Exception {
         return new TranslationService(
                 tempDir.toString(),
                 "",
@@ -988,6 +1098,7 @@ class TranslationServiceTest {
                 "",
                 "",
                 true,
+                adaptiveDatasetRoutingStrategy,
                 batchSize,
                 3,
                 10,
@@ -1021,6 +1132,7 @@ class TranslationServiceTest {
                 "",
                 "",
                 true,
+                "risky-short",
                 50,
                 3,
                 10,
@@ -1054,6 +1166,7 @@ class TranslationServiceTest {
                 "",
                 "",
                 true,
+                "risky-short",
                 50,
                 3,
                 10,
