@@ -75,6 +75,11 @@ myapp.local.openaiMaxConcurrentRequests=4
 myapp.local.openaiReasoningEffort=low
 myapp.local.openaiVerbosity=low
 
+# Optional override for the OpenAI review prompt/instructions.
+# Leave blank to use the default prompt from OpenAiTranslationReviewService.
+# You can also set this with the OPENAI_REVIEW_INSTRUCTIONS environment variable.
+myapp.local.openaiReviewInstructions=
+
 # OpenAI estimate pricing, in USD per 1M tokens. These direct openai.*
 # keys are intended for config/local.properties and can be updated as pricing changes.
 openai.inputPricePer1M=2.50

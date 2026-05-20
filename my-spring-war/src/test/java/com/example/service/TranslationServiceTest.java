@@ -142,6 +142,34 @@ class TranslationServiceTest {
     }
 
     @Test
+    void translateAndImportUsesLanguagePrefixFromTimestampedFileNames() throws Exception {
+        TranslationService service = createService("", false, "en", "bg", 50);
+
+        Path targetFile = tempDir.resolve("bg.validation-report.json");
+        Files.writeString(targetFile, """
+                {
+                  "b" : {
+                    "existing" : "existing value"
+                  }
+                }
+                """);
+
+        List<TranslationRow> rows = List.of(
+                new TranslationRow("b", "AddExternalOperator", "Добавете външен оператор", "")
+        );
+
+        service.translateAndImport(null, "bg-20260519-172928.json", "bg.validation-report.json", rows);
+
+        String actual = Files.readString(targetFile);
+        assertEquals("""
+                {
+                  "b" : {
+                    "AddExternalOperator" : "Добавете външен оператор"
+                  }
+                }""", normalizeLineEndings(actual));
+    }
+
+    @Test
     void translateAndStoreFallsBackToReferenceLanguageWhenFileNameIsNotLanguageCode() throws Exception {
         TranslationService service = createService("", false, "en", "bg", 50);
 
@@ -1196,6 +1224,7 @@ class TranslationServiceTest {
                 1,
                 "low",
                 "low",
+                "",
                 tempDir.resolve("openai-report.csv").toString(),
                 BigDecimal.ZERO,
                 BigDecimal.ZERO,
