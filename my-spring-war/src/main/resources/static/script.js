@@ -568,6 +568,17 @@ function buildRowIdentity(section, key) {
   return `${section || ''}.${key || ''}`;
 }
 
+function getRowDisplayKey(row) {
+  const section = (row.section || '').trim();
+  const key = (row.column1 || '').trim();
+
+  if (!section || section === 'custom') {
+    return key;
+  }
+
+  return `${section}.${key}`;
+}
+
 function createRowSnapshot(row) {
   return {
     id: buildRowIdentity(row.section, row.column1),
@@ -934,6 +945,7 @@ function getFilteredRows() {
   if (!searchQuery) return rows;
   const q = searchQuery.toLowerCase();
   return rows.filter((row) =>
+    getRowDisplayKey(row).toLowerCase().includes(q) ||
     row.column1.toLowerCase().includes(q) ||
     row.column2.toLowerCase().includes(q) ||
     row.reference.toLowerCase().includes(q) ||
@@ -990,7 +1002,7 @@ function renderTable() {
     } else {
       const keyText = document.createElement('div');
       keyText.className = 'cell-content';
-      keyText.textContent = row.column1;
+      keyText.textContent = getRowDisplayKey(row);
       keyTd.appendChild(keyText);
     }
 

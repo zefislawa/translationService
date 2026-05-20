@@ -75,6 +75,7 @@ public class OpenAiTranslationReviewService {
     private final String verbosity;
     private final String reviewInstructions;
     private final Path reportFile;
+    private final Path summaryReportFile;
     private final BigDecimal inputPricePer1M;
     private final BigDecimal cachedInputPricePer1M;
     private final BigDecimal outputPricePer1M;
@@ -119,6 +120,7 @@ public class OpenAiTranslationReviewService {
                 ? DEFAULT_REVIEW_INSTRUCTIONS
                 : reviewInstructions.trim();
         this.reportFile = resolveReportFile(reportPath);
+        this.summaryReportFile = resolveSummaryReportFile(this.reportFile);
         this.inputPricePer1M = positiveOrZero(inputPricePer1M);
         this.cachedInputPricePer1M = positiveOrZero(cachedInputPricePer1M);
         this.outputPricePer1M = positiveOrZero(outputPricePer1M);
@@ -177,27 +179,36 @@ public class OpenAiTranslationReviewService {
             BooleanSupplier cancellationRequested
     ) {
         throwIfCancelled(cancellationRequested);
+        List<TranslationReviewItem> selectedItems = items == null ? List.of() : items;
         TranslationReviewResponse response = new TranslationReviewResponse();
-        if (!enabled || apiKey.isBlank() || items == null || items.isEmpty()) {
-            response.setItems(toFallbackItems(items));
+        if (!enabled || apiKey.isBlank() || selectedItems.isEmpty()) {
+            response.setItems(toFallbackItems(selectedItems));
             response.setSummary(summarize(response.getItems()));
             return response;
         }
 
         List<ReviewedTranslationItem> reviewed = new ArrayList<>();
-        List<List<TranslationReviewItem>> batches = batches(items);
+        UsageSummary usageSummary = UsageSummary.empty();
+        List<List<TranslationReviewItem>> batches = batches(selectedItems);
         if (maxConcurrentRequests <= 1 || batches.size() <= 1) {
             for (List<TranslationReviewItem> batch : batches) {
                 throwIfCancelled(cancellationRequested);
-                reviewed.addAll(reviewBatch(sourceLanguage, targetLanguage, context, batch, cancellationRequested));
+                BatchReviewResult batchResult = reviewBatch(sourceLanguage, targetLanguage, context, batch, cancellationRequested);
+                reviewed.addAll(batchResult.reviewedItems());
+                usageSummary = usageSummary.plus(batchResult.usageSummary());
             }
         } else {
             log.info("Processing OpenAI review with bounded concurrency: batchCount={}, maxConcurrentRequests={}",
                     batches.size(), maxConcurrentRequests);
-            reviewed.addAll(reviewBatchesConcurrently(sourceLanguage, targetLanguage, context, batches, cancellationRequested));
+            BatchReviewResult batchResult = reviewBatchesConcurrently(sourceLanguage, targetLanguage, context, batches, cancellationRequested);
+            reviewed.addAll(batchResult.reviewedItems());
+            usageSummary = usageSummary.plus(batchResult.usageSummary());
         }
         response.setItems(reviewed);
-        response.setSummary(summarize(reviewed));
+        TranslationReviewResponse.Summary summary = summarize(reviewed);
+        applyUsageSummary(summary, usageSummary);
+        response.setSummary(summary);
+        writeSummaryReport(sourceLanguage, targetLanguage, context, selectedItems.size(), batches.size(), summary);
         return response;
     }
 
@@ -209,7 +220,7 @@ public class OpenAiTranslationReviewService {
         return batches;
     }
 
-    private List<ReviewedTranslationItem> reviewBatchesConcurrently(
+    private BatchReviewResult reviewBatchesConcurrently(
             String sourceLanguage,
             String targetLanguage,
             String context,
@@ -218,8 +229,9 @@ public class OpenAiTranslationReviewService {
     ) {
         int workerCount = Math.min(maxConcurrentRequests, batches.size());
         ExecutorService executor = Executors.newFixedThreadPool(workerCount);
-        CompletionService<List<ReviewedTranslationItem>> completionService = new ExecutorCompletionService<>(executor);
+        CompletionService<BatchReviewResult> completionService = new ExecutorCompletionService<>(executor);
         List<ReviewedTranslationItem> reviewed = new ArrayList<>();
+        UsageSummary usageSummary = UsageSummary.empty();
         int submitted = 0;
         int completed = 0;
         int inFlight = 0;
@@ -234,15 +246,17 @@ public class OpenAiTranslationReviewService {
                 }
 
                 throwIfCancelled(cancellationRequested);
-                Future<List<ReviewedTranslationItem>> future = completionService.poll(200, TimeUnit.MILLISECONDS);
+                Future<BatchReviewResult> future = completionService.poll(200, TimeUnit.MILLISECONDS);
                 if (future == null) {
                     continue;
                 }
-                reviewed.addAll(awaitReviewedBatch(future));
+                BatchReviewResult batchResult = awaitReviewedBatch(future);
+                reviewed.addAll(batchResult.reviewedItems());
+                usageSummary = usageSummary.plus(batchResult.usageSummary());
                 completed++;
                 inFlight--;
             }
-            return reviewed;
+            return new BatchReviewResult(reviewed, usageSummary);
         } catch (InterruptedException ex) {
             Thread.currentThread().interrupt();
             throw new CancellationException("OpenAI translation review was interrupted");
@@ -251,7 +265,7 @@ public class OpenAiTranslationReviewService {
         }
     }
 
-    private List<ReviewedTranslationItem> awaitReviewedBatch(Future<List<ReviewedTranslationItem>> future) {
+    private BatchReviewResult awaitReviewedBatch(Future<BatchReviewResult> future) {
         try {
             return future.get();
         } catch (InterruptedException ex) {
@@ -266,7 +280,7 @@ public class OpenAiTranslationReviewService {
         }
     }
 
-    private List<ReviewedTranslationItem> reviewBatch(
+    private BatchReviewResult reviewBatch(
             String sourceLanguage,
             String targetLanguage,
             String context,
@@ -282,9 +296,9 @@ public class OpenAiTranslationReviewService {
             ResponseEntity<JsonNode> entity = executeWithRetry(headers, body, batch.size(), cancellationRequested);
             throwIfCancelled(cancellationRequested);
             List<ReviewedTranslationItem> parsed = parseResponse(entity.getBody(), batch);
-            logUsage(entity.getBody(), batch.size(), parsed);
-            writeReport(sourceLanguage, targetLanguage, context, batch, entity.getBody(), parsed);
-            return parsed;
+            UsageSummary usageSummary = logUsage(entity.getBody(), batch.size(), parsed);
+            writeReport(sourceLanguage, targetLanguage, context, batch, entity.getBody(), parsed, usageSummary);
+            return new BatchReviewResult(parsed, usageSummary);
         } catch (CancellationException ex) {
             throw ex;
         } catch (Exception ex) {
@@ -292,7 +306,7 @@ public class OpenAiTranslationReviewService {
             if (failOnError) {
                 throw ex;
             }
-            return toFallbackItems(batch);
+            return new BatchReviewResult(toFallbackItems(batch), UsageSummary.empty());
         }
     }
 
@@ -342,6 +356,25 @@ public class OpenAiTranslationReviewService {
             return configuredPath;
         }
         return configuredPath.resolve("openai-translation-review-report.csv").normalize();
+    }
+
+    private Path resolveSummaryReportFile(Path rowReportFile) {
+        Path parent = rowReportFile.getParent();
+        String fileName = rowReportFile.getFileName() == null
+                ? "openai-translation-review-report.csv"
+                : rowReportFile.getFileName().toString();
+        String baseName = fileName.replaceFirst("(?i)\\.(csv|txt)$", "");
+        if (baseName.endsWith("-report")) {
+            baseName = baseName.substring(0, baseName.length() - "-report".length()) + "-summary";
+        } else {
+            baseName = baseName + "-summary";
+        }
+        return (parent == null ? Path.of("") : parent).resolve(baseName + ".csv").toAbsolutePath().normalize();
+    }
+
+    public Path getReportDirectory() {
+        Path parent = reportFile.getParent();
+        return parent == null ? Path.of("").toAbsolutePath().normalize() : parent;
     }
 
     private boolean isRetryable(Exception ex) {
@@ -638,15 +671,30 @@ public class OpenAiTranslationReviewService {
         return reviewed;
     }
 
-    private void logUsage(JsonNode body, int batchSize, List<ReviewedTranslationItem> reviewedItems) {
-        JsonNode usage = body == null ? null : body.path("usage");
-        long inputTokens = usage == null ? 0 : usage.path("input_tokens").asLong(0);
-        long outputTokens = usage == null ? 0 : usage.path("output_tokens").asLong(0);
-        long totalTokens = usage == null ? 0 : usage.path("total_tokens").asLong(0);
+    private UsageSummary logUsage(JsonNode body, int batchSize, List<ReviewedTranslationItem> reviewedItems) {
+        UsageSummary usageSummary = extractUsageSummary(body);
         long changed = reviewedItems.stream().filter(ReviewedTranslationItem::isChanged).count();
         long failed = reviewedItems.stream().filter(it -> it.getIssues() != null && it.getIssues().contains("openai_validation_failed")).count();
         log.info("OpenAI translation review completed: model={}, batchSize={}, changed={}, failed={}, inputTokens={}, outputTokens={}, totalTokens={}, estimatedCost={}",
-                model, batchSize, changed, failed, inputTokens, outputTokens, totalTokens, "unavailable");
+                model,
+                batchSize,
+                changed,
+                failed,
+                usageSummary.inputTokens(),
+                usageSummary.outputTokens(),
+                usageSummary.totalTokens(),
+                usageSummary.formattedEstimatedCostUsd());
+        return usageSummary;
+    }
+
+    private UsageSummary extractUsageSummary(JsonNode body) {
+        JsonNode usage = body == null ? null : body.path("usage");
+        long inputTokens = usage == null ? 0 : usage.path("input_tokens").asLong(0);
+        long outputTokens = usage == null ? 0 : usage.path("output_tokens").asLong(0);
+        long totalTokens = usage == null ? 0 : usage.path("total_tokens").asLong(inputTokens + outputTokens);
+        long cachedInputTokens = usage == null ? 0 : usage.path("input_tokens_details").path("cached_tokens").asLong(0);
+        BigDecimal estimatedCost = calculateCost(inputTokens, cachedInputTokens, outputTokens);
+        return new UsageSummary(inputTokens, cachedInputTokens, outputTokens, totalTokens, estimatedCost);
     }
 
     private synchronized void writeReport(
@@ -655,7 +703,8 @@ public class OpenAiTranslationReviewService {
             String context,
             List<TranslationReviewItem> sentItems,
             JsonNode body,
-            List<ReviewedTranslationItem> receivedItems
+            List<ReviewedTranslationItem> receivedItems,
+            UsageSummary usageSummary
     ) {
         try {
             Path parent = reportFile.getParent();
@@ -665,13 +714,9 @@ public class OpenAiTranslationReviewService {
             boolean writeHeader = !Files.exists(reportFile) || Files.size(reportFile) == 0;
             StringBuilder csv = new StringBuilder();
             if (writeHeader) {
-                csv.append("timestamp,response_id,model,source_language,target_language,context,batch_size,input_tokens,output_tokens,total_tokens,key,sent_source_text,sent_translated_text,received_final_text,received_changed,received_reason,received_issues\n");
+                csv.append("timestamp,response_id,model,source_language,target_language,context,batch_size,input_tokens,output_tokens,total_tokens,cached_input_tokens,estimated_cost_usd,key,sent_source_text,sent_translated_text,received_final_text,received_changed,received_reason,received_issues\n");
             }
 
-            JsonNode usage = body == null ? null : body.path("usage");
-            long inputTokens = usage == null ? 0 : usage.path("input_tokens").asLong(0);
-            long outputTokens = usage == null ? 0 : usage.path("output_tokens").asLong(0);
-            long totalTokens = usage == null ? 0 : usage.path("total_tokens").asLong(0);
             String responseId = body == null ? "" : body.path("id").asText("");
             String timestamp = Instant.now().toString();
 
@@ -691,9 +736,11 @@ public class OpenAiTranslationReviewService {
                         .append(csvCell(targetLanguage)).append(',')
                         .append(csvCell(context)).append(',')
                         .append(sentItems.size()).append(',')
-                        .append(inputTokens).append(',')
-                        .append(outputTokens).append(',')
-                        .append(totalTokens).append(',')
+                        .append(usageSummary.inputTokens()).append(',')
+                        .append(usageSummary.outputTokens()).append(',')
+                        .append(usageSummary.totalTokens()).append(',')
+                        .append(usageSummary.cachedInputTokens()).append(',')
+                        .append(csvCell(usageSummary.formattedEstimatedCostUsd())).append(',')
                         .append(csvCell(sentItem.getKey())).append(',')
                         .append(csvCell(sentItem.getSourceText())).append(',')
                         .append(csvCell(sentItem.getTranslatedText())).append(',')
@@ -714,6 +761,46 @@ public class OpenAiTranslationReviewService {
         return "\"" + safeValue.replace("\"", "\"\"") + "\"";
     }
 
+    private synchronized void writeSummaryReport(
+            String sourceLanguage,
+            String targetLanguage,
+            String context,
+            int stringCount,
+            int batchCount,
+            TranslationReviewResponse.Summary summary
+    ) {
+        try {
+            Path parent = summaryReportFile.getParent();
+            if (parent != null) {
+                Files.createDirectories(parent);
+            }
+            boolean writeHeader = !Files.exists(summaryReportFile) || Files.size(summaryReportFile) == 0;
+            StringBuilder csv = new StringBuilder();
+            if (writeHeader) {
+                csv.append("timestamp,model,source_language,target_language,context,string_count,batch_count,changed,unchanged,failed,total_input_tokens,total_cached_input_tokens,total_output_tokens,total_tokens,total_estimated_cost_usd\n");
+            }
+            csv.append(csvCell(Instant.now().toString())).append(',')
+                    .append(csvCell(model)).append(',')
+                    .append(csvCell(normalizeSourceLanguage(sourceLanguage))).append(',')
+                    .append(csvCell(targetLanguage)).append(',')
+                    .append(csvCell(context)).append(',')
+                    .append(stringCount).append(',')
+                    .append(batchCount).append(',')
+                    .append(summary.getChanged()).append(',')
+                    .append(summary.getUnchanged()).append(',')
+                    .append(summary.getFailed()).append(',')
+                    .append(summary.getInputTokens()).append(',')
+                    .append(summary.getCachedInputTokens()).append(',')
+                    .append(summary.getOutputTokens()).append(',')
+                    .append(summary.getTotalTokens()).append(',')
+                    .append(csvCell(summary.getEstimatedCostUsd()))
+                    .append('\n');
+            Files.writeString(summaryReportFile, csv.toString(), StandardCharsets.UTF_8, StandardOpenOption.CREATE, StandardOpenOption.APPEND);
+        } catch (Exception ex) {
+            log.warn("Failed to write OpenAI translation review summary report to {}: {}", summaryReportFile, ex.getMessage());
+        }
+    }
+
     private TranslationReviewResponse.Summary summarize(List<ReviewedTranslationItem> items) {
         TranslationReviewResponse.Summary summary = new TranslationReviewResponse.Summary();
         summary.setTotal(items.size());
@@ -725,5 +812,45 @@ public class OpenAiTranslationReviewService {
         summary.setUnchanged(items.size() - changed - failed);
         summary.setFailed(failed);
         return summary;
+    }
+
+    private void applyUsageSummary(TranslationReviewResponse.Summary summary, UsageSummary usageSummary) {
+        summary.setInputTokens(usageSummary.inputTokens());
+        summary.setCachedInputTokens(usageSummary.cachedInputTokens());
+        summary.setOutputTokens(usageSummary.outputTokens());
+        summary.setTotalTokens(usageSummary.totalTokens());
+        summary.setEstimatedCostUsd(usageSummary.formattedEstimatedCostUsd());
+    }
+
+    private record BatchReviewResult(List<ReviewedTranslationItem> reviewedItems, UsageSummary usageSummary) {
+    }
+
+    private record UsageSummary(
+            long inputTokens,
+            long cachedInputTokens,
+            long outputTokens,
+            long totalTokens,
+            BigDecimal estimatedCostUsd
+    ) {
+        private static UsageSummary empty() {
+            return new UsageSummary(0, 0, 0, 0, BigDecimal.ZERO);
+        }
+
+        private UsageSummary plus(UsageSummary other) {
+            if (other == null) {
+                return this;
+            }
+            return new UsageSummary(
+                    inputTokens + other.inputTokens,
+                    cachedInputTokens + other.cachedInputTokens,
+                    outputTokens + other.outputTokens,
+                    totalTokens + other.totalTokens,
+                    estimatedCostUsd.add(other.estimatedCostUsd)
+            );
+        }
+
+        private String formattedEstimatedCostUsd() {
+            return estimatedCostUsd.setScale(6, RoundingMode.HALF_UP).stripTrailingZeros().toPlainString();
+        }
     }
 }

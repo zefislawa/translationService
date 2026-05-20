@@ -355,6 +355,28 @@ public class TranslationService {
             Boolean postProcessWithOpenAi,
             String translationRequestId
     ) throws Exception {
+        return translateAndStoreToDirectory(
+                customPath,
+                customPath,
+                fileName,
+                targetLanguage,
+                rows,
+                translationMode,
+                postProcessWithOpenAi,
+                translationRequestId
+        );
+    }
+
+    public TranslationExportResult translateAndStoreToDirectory(
+            String sourcePath,
+            String outputPath,
+            String fileName,
+            String targetLanguage,
+            List<TranslationRow> rows,
+            String translationMode,
+            Boolean postProcessWithOpenAi,
+            String translationRequestId
+    ) throws Exception {
         if (rows == null || rows.isEmpty()) {
             throw new IllegalArgumentException("No rows provided for translation");
         }
@@ -365,7 +387,7 @@ public class TranslationService {
 
         String sourceLanguage = resolveSourceLanguage(fileName, rows);
         TranslationPipelineResult pipelineResult = runTranslationPipeline(
-                customPath,
+                sourcePath,
                 rows,
                 sourceLanguage,
                 targetLanguage,
@@ -385,8 +407,9 @@ public class TranslationService {
             translatedByFullKey.put(row.getSection() + "." + row.getKey(), translatedTexts.get(i));
         }
 
-        Path sourceFile = resolveJsonFile(customPath, fileName);
-        Path outputFile = resolveGeneratedJsonFile(sourceFile.getParent(), targetLanguage);
+        Path sourceFile = resolveJsonFile(sourcePath, fileName);
+        Path outputDirectory = resolveDataDir(outputPath);
+        Path outputFile = resolveGeneratedJsonFile(outputDirectory, targetLanguage);
         Object sourcePayload = mapper.readValue(sourceFile.toFile(), Object.class);
         Object translatedPayload = rebuildTranslatedPayload(sourcePayload, translatedByFullKey);
         mapper.writerWithDefaultPrettyPrinter().writeValue(outputFile.toFile(), translatedPayload);
@@ -1608,9 +1631,11 @@ public class TranslationService {
 
     private void writeValidationReport(Path outputFile, ValidationReport report) throws Exception {
         String fileName = outputFile.getFileName().toString().replaceFirst("(?i)\\.json$", "");
-        Path jsonReportFile = outputFile.getParent().resolve(fileName + ".validation-report.json");
+        Path reportDirectory = openAiTranslationReviewService.getReportDirectory();
+        Files.createDirectories(reportDirectory);
+        Path jsonReportFile = reportDirectory.resolve(fileName + ".validation-report.json");
         mapper.writerWithDefaultPrettyPrinter().writeValue(jsonReportFile.toFile(), report);
-        Path csvReportFile = outputFile.getParent().resolve(fileName + ".validation-report.csv");
+        Path csvReportFile = reportDirectory.resolve(fileName + ".validation-report.csv");
         Files.writeString(csvReportFile, buildCsvReport(report), StandardCharsets.UTF_8);
     }
 
