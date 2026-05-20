@@ -401,10 +401,30 @@ function detectSourceLanguageFromSelectedFile(fileName) {
   if (!fileName) {
     return '';
   }
-  const normalized = fileName.replace(/\.json$/i, '').trim();
-  return normalized || '';
+  const baseName = (fileName.split(/[\\/]/).pop() || '').replace(/\.json$/i, '').trim();
+  const parts = baseName.split(/[-_.]/).filter(Boolean);
+  if (!/^[a-z]{2,3}$/i.test(parts[0] || '')) {
+    return baseName || '';
+  }
+  return /^[a-z]{2,4}$/i.test(parts[1] || '')
+    ? `${parts[0]}-${parts[1]}`.toLowerCase()
+    : parts[0].toLowerCase();
 }
 
+async function readApiErrorMessage(res, fallbackMessage) {
+  const fallback = fallbackMessage || `Request failed (HTTP ${res.status})`;
+  const errorText = await res.text();
+  if (!errorText) {
+    return fallback;
+  }
+
+  try {
+    const parsed = JSON.parse(errorText);
+    return parsed.message || parsed.error || fallback;
+  } catch (error) {
+    return errorText;
+  }
+}
 
 async function compareFiles(file1, file2) {
   const res = await fetch('/api/translations/compare', {
@@ -413,25 +433,30 @@ async function compareFiles(file1, file2) {
     body: JSON.stringify({ fileName1: file1, fileName2: file2, context: activeContext })
   });
 
-  if (!res.ok) throw new Error(`Unable to compare files (HTTP ${res.status})`);
+  if (!res.ok) throw new Error(await readApiErrorMessage(res, `Unable to compare files (HTTP ${res.status})`));
   return res.json();
 }
 
 async function translateAndImportCompareRows(sourceFileName, targetFileName, rows) {
+  const requestId = createTranslationRequestId();
   const res = await fetch('/api/translations/compare/translate-import', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Translation-Request-Id': requestId
+    },
     body: JSON.stringify({
       sourceFileName,
       targetFileName,
       context: activeContext,
+      mode: translationMode,
+      postProcessWithOpenAi: elements.openAiPostProcess ? elements.openAiPostProcess.checked : true,
       rows
     })
   });
 
   if (!res.ok) {
-    const errorText = await res.text();
-    throw new Error(errorText || `Unable to translate and import compare rows (HTTP ${res.status})`);
+    throw new Error(await readApiErrorMessage(res, `Unable to translate and import compare rows (HTTP ${res.status})`));
   }
 
   return res.json();
@@ -802,7 +827,9 @@ async function translateAndStore(targetLanguage, signal, requestId) {
     })
   });
 
-  if (!res.ok) throw new Error(`Failed to translate text via Google API (HTTP ${res.status})`);
+  if (!res.ok) {
+    throw new Error(await readApiErrorMessage(res, `Failed to translate text via Google API (HTTP ${res.status})`));
+  }
   return res.json();
 }
 

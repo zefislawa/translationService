@@ -8,6 +8,8 @@ public class TranslationCompareTranslateImportRequest {
     private String context;
     private String sourceFileName;
     private String targetFileName;
+    private String mode;
+    private Boolean postProcessWithOpenAi;
     private List<TranslationRow> rows;
 
 
@@ -40,6 +42,22 @@ public class TranslationCompareTranslateImportRequest {
 
     public void setTargetFileName(String targetFileName) {
         this.targetFileName = targetFileName;
+    }
+
+    public String getMode() {
+        return mode;
+    }
+
+    public void setMode(String mode) {
+        this.mode = mode;
+    }
+
+    public Boolean getPostProcessWithOpenAi() {
+        return postProcessWithOpenAi;
+    }
+
+    public void setPostProcessWithOpenAi(Boolean postProcessWithOpenAi) {
+        this.postProcessWithOpenAi = postProcessWithOpenAi;
     }
 
     public List<TranslationRow> getRows() {

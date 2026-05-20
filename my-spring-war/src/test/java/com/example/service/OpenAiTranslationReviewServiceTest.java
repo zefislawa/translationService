@@ -23,11 +23,13 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CancellationException;
 
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.containsString;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.method;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
@@ -67,6 +69,21 @@ class OpenAiTranslationReviewServiceTest {
 
         assertEquals(1, response.getItems().size());
         assertFalse(response.getItems().get(0).isChanged());
+        server.verify();
+    }
+
+    @Test
+    void cancellationStopsOpenAiReviewBeforeStartingRequest() throws Exception {
+        OpenAiTranslationReviewService service = newService(true, "gpt-5.4", 100, 3, 1);
+        MockRestServiceServer server = bindMockServer(service);
+
+        assertThrows(CancellationException.class, () -> service.reviewTranslations(
+                "en",
+                "bg",
+                "crm",
+                List.of(item("PayNow", "Pay Now", "ÐŸÐ»Ð°Ñ‚Ð¸ ÑÐµÐ³Ð°")),
+                () -> true
+        ));
         server.verify();
     }
 
@@ -295,6 +312,7 @@ class OpenAiTranslationReviewServiceTest {
                 1,
                 "low",
                 "low",
+                "",
                 tempDir.resolve("openai-report.csv").toString(),
                 new BigDecimal(inputPricePer1M),
                 new BigDecimal(cachedInputPricePer1M),

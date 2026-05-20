@@ -151,13 +151,23 @@ public class TranslationController {
     }
 
     @PostMapping("/compare/translate-import")
-    public TranslationExportResult translateImportCompareRows(@RequestBody TranslationCompareTranslateImportRequest request) throws Exception {
-        return translationService.translateAndImport(
-                resolveSourceDirectory(request.getContext()),
-                request.getSourceFileName(),
-                request.getTargetFileName(),
-                request.getRows()
-        );
+    public TranslationExportResult translateImportCompareRows(
+            @RequestBody TranslationCompareTranslateImportRequest request,
+            @RequestHeader(value = "X-Translation-Request-Id", required = false) String translationRequestId
+    ) throws Exception {
+        try {
+            return translationService.translateAndImport(
+                    resolveSourceDirectory(request.getContext()),
+                    request.getSourceFileName(),
+                    request.getTargetFileName(),
+                    request.getRows(),
+                    request.getMode(),
+                    request.getPostProcessWithOpenAi(),
+                    translationRequestId
+            );
+        } finally {
+            translationService.clearTranslationCancellation(translationRequestId);
+        }
     }
 
     @PostMapping("/review")
