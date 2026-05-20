@@ -25,11 +25,15 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.util.*;
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.CompletionService;
+import java.util.concurrent.ExecutorCompletionService;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.function.BooleanSupplier;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -37,6 +41,26 @@ import java.util.regex.Pattern;
 public class OpenAiTranslationReviewService {
     private static final Logger log = LoggerFactory.getLogger(OpenAiTranslationReviewService.class);
     private static final Pattern PLACEHOLDER_PATTERN = Pattern.compile("\\{\\{[^{}]+}}|\\{[^{}]+}|%\\d*\\$?[sdfoxegc]|<[^>]+>");
+    private static final BooleanSupplier NEVER_CANCELLED = () -> false;
+    private static final String DEFAULT_REVIEW_INSTRUCTIONS = """
+            You are a localization QA reviewer for software UI strings.
+
+            Review Google-translated strings against the original OpenAI English (UK) source and telecom system/UI product context.
+            Improve only when needed.
+
+            Rules:
+            - Preserve the original meaning.
+            - Keep the translation suitable for software UI.
+            - Keep wording concise and natural.
+            - Preserve placeholders exactly, including {0}, {1}, {{count}}, %s, %d.
+            - Preserve HTML tags exactly.
+            - Preserve ICU/plural/message syntax exactly.
+            - Do not translate product names, technical identifiers, resource keys, or code-like values.
+            - Do not invent extra meaning.
+            - If the translation is already good, omit that item from the response.
+            - Return only items that need a changed finalText or have issues to report.
+            - Return only JSON matching the schema.
+            """;
 
     private final boolean enabled;
     private final String apiKey;
@@ -49,6 +73,7 @@ public class OpenAiTranslationReviewService {
     private final int maxConcurrentRequests;
     private final String reasoningEffort;
     private final String verbosity;
+    private final String reviewInstructions;
     private final Path reportFile;
     private final BigDecimal inputPricePer1M;
     private final BigDecimal cachedInputPricePer1M;
@@ -70,6 +95,7 @@ public class OpenAiTranslationReviewService {
             @Value("${openai.max-concurrent-requests:1}") int maxConcurrentRequests,
             @Value("${openai.reasoning-effort:low}") String reasoningEffort,
             @Value("${openai.verbosity:low}") String verbosity,
+            @Value("${openai.review-instructions:}") String reviewInstructions,
             @Value("${openai.report-path:reports/openai}") String reportPath,
             @Value("${openai.inputPricePer1M:0}") BigDecimal inputPricePer1M,
             @Value("${openai.cachedInputPricePer1M:0}") BigDecimal cachedInputPricePer1M,
@@ -89,6 +115,9 @@ public class OpenAiTranslationReviewService {
         this.maxConcurrentRequests = Math.max(1, maxConcurrentRequests);
         this.reasoningEffort = reasoningEffort;
         this.verbosity = verbosity;
+        this.reviewInstructions = reviewInstructions == null || reviewInstructions.isBlank()
+                ? DEFAULT_REVIEW_INSTRUCTIONS
+                : reviewInstructions.trim();
         this.reportFile = resolveReportFile(reportPath);
         this.inputPricePer1M = positiveOrZero(inputPricePer1M);
         this.cachedInputPricePer1M = positiveOrZero(cachedInputPricePer1M);
@@ -137,6 +166,17 @@ public class OpenAiTranslationReviewService {
     }
 
     public TranslationReviewResponse reviewTranslations(String sourceLanguage, String targetLanguage, String context, List<TranslationReviewItem> items) {
+        return reviewTranslations(sourceLanguage, targetLanguage, context, items, NEVER_CANCELLED);
+    }
+
+    public TranslationReviewResponse reviewTranslations(
+            String sourceLanguage,
+            String targetLanguage,
+            String context,
+            List<TranslationReviewItem> items,
+            BooleanSupplier cancellationRequested
+    ) {
+        throwIfCancelled(cancellationRequested);
         TranslationReviewResponse response = new TranslationReviewResponse();
         if (!enabled || apiKey.isBlank() || items == null || items.isEmpty()) {
             response.setItems(toFallbackItems(items));
@@ -148,23 +188,13 @@ public class OpenAiTranslationReviewService {
         List<List<TranslationReviewItem>> batches = batches(items);
         if (maxConcurrentRequests <= 1 || batches.size() <= 1) {
             for (List<TranslationReviewItem> batch : batches) {
-                reviewed.addAll(reviewBatch(sourceLanguage, targetLanguage, context, batch));
+                throwIfCancelled(cancellationRequested);
+                reviewed.addAll(reviewBatch(sourceLanguage, targetLanguage, context, batch, cancellationRequested));
             }
         } else {
             log.info("Processing OpenAI review with bounded concurrency: batchCount={}, maxConcurrentRequests={}",
                     batches.size(), maxConcurrentRequests);
-            ExecutorService executor = Executors.newFixedThreadPool(Math.min(maxConcurrentRequests, batches.size()));
-            try {
-                List<Future<List<ReviewedTranslationItem>>> futures = new ArrayList<>(batches.size());
-                for (List<TranslationReviewItem> batch : batches) {
-                    futures.add(executor.submit(() -> reviewBatch(sourceLanguage, targetLanguage, context, batch)));
-                }
-                for (Future<List<ReviewedTranslationItem>> future : futures) {
-                    reviewed.addAll(awaitReviewedBatch(future));
-                }
-            } finally {
-                executor.shutdownNow();
-            }
+            reviewed.addAll(reviewBatchesConcurrently(sourceLanguage, targetLanguage, context, batches, cancellationRequested));
         }
         response.setItems(reviewed);
         response.setSummary(summarize(reviewed));
@@ -177,6 +207,48 @@ public class OpenAiTranslationReviewService {
             batches.add(items.subList(i, Math.min(items.size(), i + maxBatchSize)));
         }
         return batches;
+    }
+
+    private List<ReviewedTranslationItem> reviewBatchesConcurrently(
+            String sourceLanguage,
+            String targetLanguage,
+            String context,
+            List<List<TranslationReviewItem>> batches,
+            BooleanSupplier cancellationRequested
+    ) {
+        int workerCount = Math.min(maxConcurrentRequests, batches.size());
+        ExecutorService executor = Executors.newFixedThreadPool(workerCount);
+        CompletionService<List<ReviewedTranslationItem>> completionService = new ExecutorCompletionService<>(executor);
+        List<ReviewedTranslationItem> reviewed = new ArrayList<>();
+        int submitted = 0;
+        int completed = 0;
+        int inFlight = 0;
+
+        try {
+            while (completed < batches.size()) {
+                while (submitted < batches.size() && inFlight < workerCount) {
+                    throwIfCancelled(cancellationRequested);
+                    List<TranslationReviewItem> batch = batches.get(submitted++);
+                    completionService.submit(() -> reviewBatch(sourceLanguage, targetLanguage, context, batch, cancellationRequested));
+                    inFlight++;
+                }
+
+                throwIfCancelled(cancellationRequested);
+                Future<List<ReviewedTranslationItem>> future = completionService.poll(200, TimeUnit.MILLISECONDS);
+                if (future == null) {
+                    continue;
+                }
+                reviewed.addAll(awaitReviewedBatch(future));
+                completed++;
+                inFlight--;
+            }
+            return reviewed;
+        } catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
+            throw new CancellationException("OpenAI translation review was interrupted");
+        } finally {
+            executor.shutdownNow();
+        }
     }
 
     private List<ReviewedTranslationItem> awaitReviewedBatch(Future<List<ReviewedTranslationItem>> future) {
@@ -194,17 +266,27 @@ public class OpenAiTranslationReviewService {
         }
     }
 
-    private List<ReviewedTranslationItem> reviewBatch(String sourceLanguage, String targetLanguage, String context, List<TranslationReviewItem> batch) {
+    private List<ReviewedTranslationItem> reviewBatch(
+            String sourceLanguage,
+            String targetLanguage,
+            String context,
+            List<TranslationReviewItem> batch,
+            BooleanSupplier cancellationRequested
+    ) {
         try {
+            throwIfCancelled(cancellationRequested);
             HttpHeaders headers = new HttpHeaders();
             headers.setContentType(MediaType.APPLICATION_JSON);
             headers.setBearerAuth(apiKey);
             Map<String, Object> body = buildRequest(sourceLanguage, targetLanguage, context, batch);
-            ResponseEntity<JsonNode> entity = executeWithRetry(headers, body, batch.size());
+            ResponseEntity<JsonNode> entity = executeWithRetry(headers, body, batch.size(), cancellationRequested);
+            throwIfCancelled(cancellationRequested);
             List<ReviewedTranslationItem> parsed = parseResponse(entity.getBody(), batch);
             logUsage(entity.getBody(), batch.size(), parsed);
             writeReport(sourceLanguage, targetLanguage, context, batch, entity.getBody(), parsed);
             return parsed;
+        } catch (CancellationException ex) {
+            throw ex;
         } catch (Exception ex) {
             log.warn("OpenAI translation review failed, falling back to Google output. reason={}", ex.getMessage());
             if (failOnError) {
@@ -214,12 +296,21 @@ public class OpenAiTranslationReviewService {
         }
     }
 
-    private ResponseEntity<JsonNode> executeWithRetry(HttpHeaders headers, Map<String, Object> body, int batchSize) {
+    private ResponseEntity<JsonNode> executeWithRetry(
+            HttpHeaders headers,
+            Map<String, Object> body,
+            int batchSize,
+            BooleanSupplier cancellationRequested
+    ) {
         int retriesUsed = 0;
         while (true) {
             try {
+                throwIfCancelled(cancellationRequested);
                 return restTemplate.postForEntity(baseUrl + "/responses", new HttpEntity<>(body, headers), JsonNode.class);
             } catch (Exception ex) {
+                if (ex instanceof CancellationException) {
+                    throw ex;
+                }
                 boolean retryable = isRetryable(ex);
                 if (!retryable || retriesUsed >= maxRetries) {
                     throw ex;
@@ -227,7 +318,7 @@ public class OpenAiTranslationReviewService {
                 long backoff = retryBackoffMs * (1L << retriesUsed);
                 log.warn("Retrying OpenAI review batch after transient failure attempt={} batchSize={} retryInMs={}",
                         retriesUsed + 1, batchSize, backoff);
-                sleep(backoff);
+                sleep(backoff, cancellationRequested);
                 retriesUsed++;
             }
         }
@@ -314,35 +405,22 @@ public class OpenAiTranslationReviewService {
         return item.getSourceText() == null ? "" : item.getSourceText();
     }
 
-    private void sleep(long delayMs) {
+    private void sleep(long delayMs, BooleanSupplier cancellationRequested) {
+        long remainingMs = delayMs;
         try {
-            TimeUnit.MILLISECONDS.sleep(delayMs);
+            while (remainingMs > 0) {
+                throwIfCancelled(cancellationRequested);
+                long sleepMs = Math.min(remainingMs, 200L);
+                TimeUnit.MILLISECONDS.sleep(sleepMs);
+                remainingMs -= sleepMs;
+            }
         } catch (InterruptedException interruptedException) {
             Thread.currentThread().interrupt();
-            throw new IllegalStateException("Interrupted while waiting to retry OpenAI request", interruptedException);
+            throw new CancellationException("Interrupted while waiting to retry OpenAI request");
         }
     }
 
     private Map<String, Object> buildRequest(String sourceLanguage, String targetLanguage, String context, List<TranslationReviewItem> batch) {
-        String instruction = """
-                You are a localization QA reviewer for software UI strings.
-
-                Review Google-translated strings against the original OpenAI English (UK) source and telecom system/UI product context.
-                Improve only when needed.
-
-                Rules:
-                - Preserve the original meaning.
-                - Keep the translation suitable for software UI.
-                - Keep wording concise and natural.
-                - Preserve placeholders exactly, including {0}, {1}, {{count}}, %s, %d.
-                - Preserve HTML tags exactly.
-                - Preserve ICU/plural/message syntax exactly.
-                - Do not translate product names, technical identifiers, resource keys, or code-like values.
-                - Do not invent extra meaning.
-                - If the translation is already good, omit that item from the response.
-                - Return only items that need a changed finalText or have issues to report.
-                - Return only JSON matching the schema.
-                """;
         TranslationReviewRequest request = new TranslationReviewRequest();
         request.setSourceLanguage(normalizeSourceLanguage(sourceLanguage));
         request.setTargetLanguage(targetLanguage);
@@ -383,11 +461,17 @@ public class OpenAiTranslationReviewService {
                 )
         ));
         payload.put("input", List.of(
-                Map.of("role", "system", "content", List.of(Map.of("type", "input_text", "text", instruction))),
+                Map.of("role", "system", "content", List.of(Map.of("type", "input_text", "text", reviewInstructions))),
                 Map.of("role", "user", "content", List.of(Map.of("type", "input_text", "text", mapper.valueToTree(request).toString())))
         ));
         payload.put("max_output_tokens", 4000);
         return payload;
+    }
+
+    private void throwIfCancelled(BooleanSupplier cancellationRequested) {
+        if (cancellationRequested != null && cancellationRequested.getAsBoolean()) {
+            throw new CancellationException("Translation request was cancelled by user");
+        }
     }
 
     private String normalizeSourceLanguage(String sourceLanguage) {

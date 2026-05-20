@@ -429,12 +429,16 @@ public class TranslationService {
     }
 
     private void throwIfTranslationCancelled(String translationRequestId) {
-        if (translationRequestId == null || translationRequestId.isBlank()) {
-            return;
-        }
-        if (cancelledTranslationRequests.contains(translationRequestId.trim())) {
+        if (isTranslationCancellationRequested(translationRequestId)) {
             throw new CancellationException("Translation request was cancelled by user");
         }
+    }
+
+    private boolean isTranslationCancellationRequested(String translationRequestId) {
+        if (translationRequestId == null || translationRequestId.isBlank()) {
+            return false;
+        }
+        return cancelledTranslationRequests.contains(translationRequestId.trim());
     }
 
     private Object rebuildTranslatedPayload(Object sourcePayload, Map<String, String> translatedByFullKey) {
@@ -474,20 +478,33 @@ public class TranslationService {
             String targetFileName,
             List<TranslationRow> rows
     ) throws Exception {
+        return translateAndImport(customPath, sourceFileName, targetFileName, rows, "adaptive", null, null);
+    }
+
+    public TranslationExportResult translateAndImport(
+            String customPath,
+            String sourceFileName,
+            String targetFileName,
+            List<TranslationRow> rows,
+            String translationMode,
+            Boolean postProcessWithOpenAi,
+            String translationRequestId
+    ) throws Exception {
         if (rows == null || rows.isEmpty()) {
             throw new IllegalArgumentException("No rows provided for translation");
         }
+        throwIfTranslationCancelled(translationRequestId);
 
-        String sourceLanguage = extractLanguageFromFileName(sourceFileName);
+        String sourceLanguage = resolveSourceLanguage(sourceFileName, rows);
         String targetLanguage = extractLanguageFromFileName(targetFileName);
         TranslationPipelineResult pipelineResult = runTranslationPipeline(
                 customPath,
                 rows,
                 sourceLanguage,
                 targetLanguage,
-                null,
-                null,
-                null
+                translationMode,
+                postProcessWithOpenAi,
+                translationRequestId
         );
         List<String> translatedTexts = pipelineResult.translatedTexts();
 
@@ -742,7 +759,7 @@ public class TranslationService {
                 : translatedProtectedTexts;
         boolean applyOpenAi = postProcessWithOpenAi != null ? postProcessWithOpenAi : openAiPostProcessingEnabled;
         List<String> reviewedTexts = applyOpenAi
-                ? applyOpenAiReview(sourceLanguage, targetLanguage, protectedItems, restoredTexts)
+                ? applyOpenAiReview(sourceLanguage, targetLanguage, protectedItems, restoredTexts, translationRequestId)
                 : restoredTexts;
         ValidationReport validationReport = validationEnabled
                 ? validateResults(
@@ -762,8 +779,10 @@ public class TranslationService {
             String sourceLanguage,
             String targetLanguage,
             List<PreparedTranslationItem> items,
-            List<String> translatedTexts
+            List<String> translatedTexts,
+            String translationRequestId
     ) {
+        throwIfTranslationCancelled(translationRequestId);
         List<TranslationReviewItem> reviewItems = new ArrayList<>(items.size());
         for (int i = 0; i < items.size(); i++) {
             PreparedTranslationItem item = items.get(i);
@@ -778,8 +797,10 @@ public class TranslationService {
                 sourceLanguage,
                 targetLanguage,
                 "CRM and self-service product UI translation",
-                reviewItems
+                reviewItems,
+                () -> isTranslationCancellationRequested(translationRequestId)
         );
+        throwIfTranslationCancelled(translationRequestId);
         Map<String, String> byKey = new LinkedHashMap<>();
         if (response.getItems() != null) {
             response.getItems().forEach(it -> byKey.put(it.getKey(), it.getFinalText()));
@@ -2502,10 +2523,15 @@ public class TranslationService {
         if (normalized.isBlank()) {
             throw new IllegalArgumentException("Cannot detect source language from file name: " + fileName);
         }
-        if (!normalized.matches("^[A-Za-z]{2,3}(?:[-_][A-Za-z0-9]{2,8})*$")) {
+        String[] nameParts = normalized.split("[-_.]");
+        if (nameParts.length == 0 || !nameParts[0].matches("^[A-Za-z]{2,3}$")) {
             throw new IllegalArgumentException("Invalid language code in file name: " + fileName);
         }
-        return normalized;
+        String primaryLanguage = nameParts[0].toLowerCase(Locale.ROOT);
+        if (nameParts.length < 2 || !nameParts[1].matches("^[A-Za-z]{2,4}$")) {
+            return primaryLanguage;
+        }
+        return primaryLanguage + "-" + nameParts[1].toLowerCase(Locale.ROOT);
     }
 
     private String resolveSourceLanguage(String fileName, List<TranslationRow> rows) {
@@ -2515,12 +2541,11 @@ public class TranslationService {
             return inferSourceLanguageFromRows(rows, fallbackLanguage);
         }
 
-        String normalized = Path.of(fileName).getFileName().toString().replaceFirst("(?i)\\.json$", "");
-        if (!normalized.matches("^[A-Za-z]{2,3}(?:[-_][A-Za-z0-9]{2,8})*$")) {
+        try {
+            return extractLanguageFromFileName(fileName).toLowerCase(Locale.ROOT);
+        } catch (IllegalArgumentException ex) {
             return inferSourceLanguageFromRows(rows, fallbackLanguage);
         }
-
-        return normalized.toLowerCase(Locale.ROOT);
     }
 
     private String inferSourceLanguageFromRows(List<TranslationRow> rows, String fallbackLanguage) {
