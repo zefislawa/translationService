@@ -116,8 +116,9 @@ public class TranslationController {
             @RequestHeader(value = "X-Translation-Request-Id", required = false) String translationRequestId
     ) throws Exception {
         try {
-            TranslationExportResult result = translationService.translateAndStore(
+            return translationService.translateAndStoreToDirectory(
                     resolveSourceDirectory(request.getContext()),
+                    resolveTranslatedDirectory(request.getContext()),
                     request.getFileName(),
                     request.getTargetLanguage(),
                     request.getRows(),
@@ -125,8 +126,6 @@ public class TranslationController {
                     request.getPostProcessWithOpenAi(),
                     translationRequestId
             );
-            copyTranslatedFileToContextDirectory(result.getOutputFile(), request.getContext());
-            return result;
         } finally {
             translationService.clearTranslationCancellation(translationRequestId);
         }
@@ -238,32 +237,6 @@ public class TranslationController {
 
     private String resolveTranslatedDirectory(String context) {
         return "selfService".equalsIgnoreCase(context) ? selfServiceTranslatedDirectory : crmTranslatedDirectory;
-    }
-
-    private void copyTranslatedFileToContextDirectory(String outputFilePath, String context) throws Exception {
-        Path source = Path.of(outputFilePath).toAbsolutePath().normalize();
-        Path destinationDir = Path.of(resolveTranslatedDirectory(context)).toAbsolutePath().normalize();
-        Files.createDirectories(destinationDir);
-        Path destination = resolveUniqueDestinationFile(destinationDir, source.getFileName().toString());
-        Files.copy(source, destination);
-    }
-
-    private Path resolveUniqueDestinationFile(Path destinationDir, String fileName) {
-        Path destination = destinationDir.resolve(fileName).normalize();
-        if (!Files.exists(destination)) {
-            return destination;
-        }
-
-        String baseName = fileName.replaceFirst("(?i)\\.json$", "");
-        String extension = fileName.toLowerCase().endsWith(".json") ? ".json" : "";
-        String timestamp = java.time.LocalDateTime.now().format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss"));
-        Path candidate = destinationDir.resolve(baseName + "-" + timestamp + extension).normalize();
-        int suffix = 2;
-        while (Files.exists(candidate)) {
-            candidate = destinationDir.resolve(baseName + "-" + timestamp + "-" + suffix + extension).normalize();
-            suffix++;
-        }
-        return candidate;
     }
 
     private List<String> listFilesByExtension(String directory, String extension) throws Exception {

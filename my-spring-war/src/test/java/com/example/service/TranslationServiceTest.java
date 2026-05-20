@@ -208,6 +208,44 @@ class TranslationServiceTest {
     }
 
     @Test
+    void translateAndStoreToDirectoryWritesJsonOnlyToTranslatedDirectoryAndReportsToOpenAiDirectory() throws Exception {
+        Path sourceDir = tempDir.resolve("source");
+        Path translatedDir = tempDir.resolve("translated");
+        Path openAiReportDir = tempDir.resolve("reports").resolve("openai");
+        Files.createDirectories(sourceDir);
+        Files.writeString(sourceDir.resolve("en.json"), """
+                {
+                  "b" : {
+                    "apply" : "Apply"
+                  }
+                }
+                """);
+        TranslationService service = createService("", false, "en", "en", 50, "risky-short", openAiReportDir.toString());
+
+        TranslationExportResult result = service.translateAndStoreToDirectory(
+                sourceDir.toString(),
+                translatedDir.toString(),
+                "en.json",
+                "en",
+                List.of(new TranslationRow("b", "apply", "Apply translated", "")),
+                "standard",
+                false,
+                null
+        );
+
+        Path translatedFile = translatedDir.resolve("en.json");
+        assertEquals(translatedFile.toAbsolutePath().normalize().toString(), Path.of(result.getOutputFile()).toString());
+        assertTrue(Files.exists(translatedFile));
+        assertTrue(Files.exists(sourceDir.resolve("en.json")));
+        assertEquals("Apply", new ObjectMapper().readTree(Files.readString(sourceDir.resolve("en.json"))).path("b").path("apply").asText());
+        assertEquals("Apply translated", new ObjectMapper().readTree(Files.readString(translatedFile)).path("b").path("apply").asText());
+        assertTrue(Files.exists(openAiReportDir.resolve("en.validation-report.json")));
+        assertTrue(Files.exists(openAiReportDir.resolve("en.validation-report.csv")));
+        assertFalse(Files.exists(translatedDir.resolve("en.validation-report.json")));
+        assertFalse(Files.exists(sourceDir.resolve("en.validation-report.json")));
+    }
+
+    @Test
     void loadRowsPreservesExactPrefixKeyAndSourceText() throws Exception {
         TranslationService service = createService("", false, "en", "bg", 50);
 
@@ -1081,6 +1119,26 @@ class TranslationServiceTest {
             int batchSize,
             String adaptiveDatasetRoutingStrategy
     ) throws Exception {
+        return createService(
+                riskyTermsFile,
+                glossaryEnabled,
+                sourceLanguage,
+                targetLanguage,
+                batchSize,
+                adaptiveDatasetRoutingStrategy,
+                tempDir.resolve("openai-report.csv").toString()
+        );
+    }
+
+    private TranslationService createService(
+            String riskyTermsFile,
+            boolean glossaryEnabled,
+            String sourceLanguage,
+            String targetLanguage,
+            int batchSize,
+            String adaptiveDatasetRoutingStrategy,
+            String openAiReportPath
+    ) throws Exception {
         return new TranslationService(
                 tempDir.toString(),
                 "",
@@ -1110,7 +1168,7 @@ class TranslationServiceTest {
                 false,
                 new ObjectMapper(),
                 new RestTemplateBuilder(),
-                newOpenAiTranslationReviewService()
+                newOpenAiTranslationReviewService(openAiReportPath)
         );
     }
 
@@ -1183,6 +1241,10 @@ class TranslationServiceTest {
     }
 
     private OpenAiTranslationReviewService newOpenAiTranslationReviewService() {
+        return newOpenAiTranslationReviewService(tempDir.resolve("openai-report.csv").toString());
+    }
+
+    private OpenAiTranslationReviewService newOpenAiTranslationReviewService(String reportPath) {
         return new OpenAiTranslationReviewService(
                 false,
                 "",
@@ -1196,7 +1258,7 @@ class TranslationServiceTest {
                 1,
                 "low",
                 "low",
-                tempDir.resolve("openai-report.csv").toString(),
+                reportPath,
                 BigDecimal.ZERO,
                 BigDecimal.ZERO,
                 BigDecimal.ZERO,

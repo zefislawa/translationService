@@ -167,15 +167,23 @@ class OpenAiTranslationReviewServiceTest {
         server.expect(requestTo("https://api.openai.test/v1/responses"))
                 .andRespond(openAiSuccessResponse());
 
-        service.reviewTranslations("en", "bg", "crm",
+        TranslationReviewResponse response = service.reviewTranslations("en", "bg", "crm",
                 List.of(item("PayNow", "Pay Now", "ÐŸÐ»Ð°Ñ‚Ð¸ ÑÐµÐ³Ð°")));
 
         String report = Files.readString(tempDir.resolve("openai-report.csv"));
         assertThat(report, containsString("input_tokens,output_tokens,total_tokens"));
+        assertThat(report, containsString("estimated_cost_usd"));
         assertThat(report, containsString("\"PayNow\""));
         assertThat(report, containsString("\"Pay Now\""));
         assertThat(report, containsString("\"ÐŸÐ»Ð°Ñ‚Ð¸ ÑÐµÐ³Ð°\""));
         assertThat(report, containsString(",10,5,15,"));
+        String summary = Files.readString(tempDir.resolve("openai-summary.csv"));
+        assertThat(summary, containsString("total_input_tokens,total_cached_input_tokens,total_output_tokens,total_tokens,total_estimated_cost_usd"));
+        assertThat(summary, containsString(",10,0,5,15,\"0\""));
+        assertEquals(10, response.getSummary().getInputTokens());
+        assertEquals(5, response.getSummary().getOutputTokens());
+        assertEquals(15, response.getSummary().getTotalTokens());
+        assertEquals("0", response.getSummary().getEstimatedCostUsd());
         server.verify();
     }
 
